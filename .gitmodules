@@ -1,0 +1,7 @@
+[submodule "IS-Fusion"]
+	path = IS-Fusion
+	url = git@github.com:jmcgeeuva/IS-Fusion.git
+	branch = ssiai
+[submodule "florence_pytorch"]
+	path = florence_pytorch
+	url = git@github.com:jmcgeeuva/florence_pytorch.git
