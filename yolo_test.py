@@ -91,7 +91,7 @@ def draw_polygons(image, polygons, labels, fill_mask=False, use_color=True, name
     
     return output_image
 
-def create_mask(image, polygons, labels=None):  
+def create_mask(polygons, width, height, labels=None):  
     """  
     Draws segmentation masks with polygons on an image.  
   
@@ -116,7 +116,7 @@ def create_mask(image, polygons, labels=None):
     fill_color = 'white'
 
     for _polygon in polygons: 
-        mask = Image.new("RGB", (image.width, image.height), (0, 0, 0))
+        mask = Image.new("RGB", (width, height), (0, 0, 0))
         draw = ImageDraw.Draw(mask)
         if labels is not None:
             label = labels[idx]
@@ -174,29 +174,28 @@ def main():
     masks= {idx:[(int(class_idx), mask) for mask, class_idx in zip(out.masks.xy, out.boxes.cls) if model.names[int(class_idx)] in search_labels] if len(out.boxes.cls) > 0 else [] for idx, out in enumerate(outputs)}
 
     # For testing
-    masks_no_empty = {idx:[(int(class_idx), mask) for mask, class_idx in zip(out.masks.xy, out.boxes.cls) if model.names[int(class_idx)] in search_labels] for idx, out in enumerate(outputs) if len(out.boxes.cls) > 0}
-    num_items = sum([len(val) for key, val in masks_no_empty.items()])
+    masks_no_empty = [[(int(class_idx), mask, idx) for mask, class_idx in zip(out.masks.xy, out.boxes.cls) if model.names[int(class_idx)] in search_labels] for idx, out in enumerate(outputs) if len(out.boxes.cls) > 0]
+    num_items = sum([len(entry) for entry in masks_no_empty])
     # print(sum(num_items))
 
     mask_list = []
     fig, axes = plt.subplots(2, num_items)
+    mask_list = [mask_tup[1] for entry in masks_no_empty for mask_tup in entry]
+    labels = [mask_tup[0] for entry in masks_no_empty for mask_tup in entry]
+    vids = [mask_tup[2] for entry in masks_no_empty for mask_tup in entry]
+    mask_entry = create_mask(mask_list, image.width, image.height)
+    
     cnt = 0
-    for i, key in enumerate(masks_no_empty.keys()):
-        curr_image = orig_images[key]
-        mask_entry = create_mask(transforms.ToPILImage()(curr_image), [mask[1] for mask in masks[key]])
-        mask_list.append(mask_entry)
-        if args.debug:
-            for entry in mask_entry:
-                plt.figure()
-                plt.subplot(1, 2, 1)
-                plt.imshow(transforms.ToPILImage()(entry))
-                plt.axis('off')
-                plt.subplot(1, 2, 2)
-                plt.imshow(transforms.ToPILImage()(curr_image))
-                plt.axis('off')
-                plt.savefig(f'test{cnt}.png')
-                cnt += 1
-    mask_list = torch.cat(mask_list, dim=0)
+    for entry, label, vid in zip(mask_entry, labels, vids):
+        plt.figure()
+        plt.subplot(1, 2, 1)
+        plt.imshow(transforms.ToPILImage()(entry))
+        plt.axis('off')
+        plt.subplot(1, 2, 2)
+        plt.imshow(transforms.ToPILImage()(orig_images[vid]))
+        plt.axis('off')
+        plt.savefig(f'test{cnt}.png')
+        cnt += 1
 
     if args.debug:
         fig, axes = plt.subplots(2, 3)
