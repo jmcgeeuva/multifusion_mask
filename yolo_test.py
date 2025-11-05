@@ -139,7 +139,7 @@ def create_mask(polygons, width, height, labels=None):
         masks.append(transform(mask))
     return torch.stack(masks)
     
-def run_yolo(model, tensor_list, width, height, search_labels= ['car', 'bicycle', 'fire hydrant', 'stop sign', 'parking meter', 'person']):
+def run_yolo11(model, tensor_list, width, height, search_labels= ['car', 'bicycle', 'fire hydrant', 'stop sign', 'parking meter', 'person']):
     """
     Given a tensor of BxAxCxHxW (batch x angle x channel x height x width) this function will run YOLO and find the segmentations for any of the search labels listed (as seen in model.names)
     these will then be output as a tensor of masks, the coinciding labels, and the number of the video that goes along with that output
@@ -161,6 +161,29 @@ def run_yolo(model, tensor_list, width, height, search_labels= ['car', 'bicycle'
     mask_entry = create_mask(mask_list, width, height)
 
     return mask_entry, labels, vids
+    
+def run_yolo8(model, tensor_list, width, height, search_labels= ['car', 'bicycle', 'fire hydrant', 'stop sign', 'parking meter', 'person']):
+    """
+    Given a tensor of BxAxCxHxW (batch x angle x channel x height x width) this function will run YOLO and find the segmentations for any of the search labels listed (as seen in model.names)
+    these will then be output as a tensor of masks, the coinciding labels, and the number of the video that goes along with that output
+
+    Note: If batch > 1 then angles and batches are combined and the coinciding masks can be found via the video_id
+    """
+
+    # if this input is BxAxCxHxW first rearrange to (BA)xCxHxW
+    b, a, c, h, w = tensor_list.shape
+    tensor_list = tensor_list.view(b*a, c, h, w)
+    outputs = model(tensor_list)
+
+    masks = [[(int(class_idx), mask, video_id) for mask, class_idx in zip(out.masks.data, out.boxes.cls) if model.names[int(class_idx)] in search_labels] 
+             for video_id, out in enumerate(outputs) if len(out.boxes.cls) > 0]
+
+    mask_list = [mask_tup[1] for entry in masks for mask_tup in entry]
+    labels = [mask_tup[0] for entry in masks for mask_tup in entry]
+    vids = [mask_tup[2] for entry in masks for mask_tup in entry]
+    mask_entry = torch.stack(mask_list)
+
+    return mask_entry, labels, vids
 
 def main():
     parser = argparse.ArgumentParser()
@@ -168,7 +191,7 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Use debug if present')
     args = parser.parse_args()
 
-    model=YOLO('yolo11n-seg.pt')
+    model=YOLO('yolov8n-seg.pt')
 
     dir_root = './data/nuscenes/train/samples'
     scale = args.scale
@@ -190,7 +213,7 @@ def main():
         orig_images.append(to_tensor(image))
     tensor_list = torch.stack(orig_images)
 
-    mask_entry, labels, vids = run_yolo(model, tensor_list.unsqueeze(dim=0), image.width, image.height)
+    mask_entry, labels, vids = run_yolo8(model, tensor_list.unsqueeze(dim=0), image.width, image.height)
     
     cnt = 0
     fig, axes = plt.subplots(2, mask_entry.shape[0])
