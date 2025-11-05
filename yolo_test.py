@@ -138,6 +138,29 @@ def create_mask(polygons, width, height, labels=None):
             draw.text((_polygon[0] + 8, _polygon[1] + 2), label, fill=color)  
         masks.append(transform(mask))
     return torch.stack(masks)
+    
+def run_yolo(model, tensor_list, width, height, search_labels= ['car', 'bicycle', 'fire hydrant', 'stop sign', 'parking meter', 'person']):
+    """
+    Given a tensor of BxAxCxHxW (batch x angle x channel x height x width) this function will run YOLO and find the segmentations for any of the search labels listed (as seen in model.names)
+    these will then be output as a tensor of masks, the coinciding labels, and the number of the video that goes along with that output
+
+    Note: If batch > 1 then angles and batches are combined and the coinciding masks can be found via the video_id
+    """
+
+    # if this input is BxAxCxHxW first rearrange to (BA)xCxHxW
+    b, a, c, h, w = tensor_list.shape
+    tensor_list = tensor_list.view(b*a, c, h, w)
+    outputs = model(tensor_list)
+
+    masks = [[(int(class_idx), mask, video_id) for mask, class_idx in zip(out.masks.xy, out.boxes.cls) if model.names[int(class_idx)] in search_labels] 
+             for video_id, out in enumerate(outputs) if len(out.boxes.cls) > 0]
+
+    mask_list = [mask_tup[1] for entry in masks for mask_tup in entry]
+    labels = [mask_tup[0] for entry in masks for mask_tup in entry]
+    vids = [mask_tup[2] for entry in masks for mask_tup in entry]
+    mask_entry = create_mask(mask_list, width, height)
+
+    return mask_entry, labels, vids
 
 def main():
     parser = argparse.ArgumentParser()
@@ -165,27 +188,12 @@ def main():
         image = Image.open(file_path)
         image = image.resize(((image.width//100)*scale, (image.height//100)*scale))
         orig_images.append(to_tensor(image))
-
     tensor_list = torch.stack(orig_images)
-    outputs = model(tensor_list)
 
-    search_labels = ['car', 'bicycle', 'fire hydrant', 'stop sign', 'parking meter', 'person']
-    # For printing
-    masks= {idx:[(int(class_idx), mask) for mask, class_idx in zip(out.masks.xy, out.boxes.cls) if model.names[int(class_idx)] in search_labels] if len(out.boxes.cls) > 0 else [] for idx, out in enumerate(outputs)}
-
-    # For testing
-    masks_no_empty = [[(int(class_idx), mask, idx) for mask, class_idx in zip(out.masks.xy, out.boxes.cls) if model.names[int(class_idx)] in search_labels] for idx, out in enumerate(outputs) if len(out.boxes.cls) > 0]
-    num_items = sum([len(entry) for entry in masks_no_empty])
-    # print(sum(num_items))
-
-    mask_list = []
-    fig, axes = plt.subplots(2, num_items)
-    mask_list = [mask_tup[1] for entry in masks_no_empty for mask_tup in entry]
-    labels = [mask_tup[0] for entry in masks_no_empty for mask_tup in entry]
-    vids = [mask_tup[2] for entry in masks_no_empty for mask_tup in entry]
-    mask_entry = create_mask(mask_list, image.width, image.height)
+    mask_entry, labels, vids = run_yolo(model, tensor_list.unsqueeze(dim=0), image.width, image.height)
     
     cnt = 0
+    fig, axes = plt.subplots(2, mask_entry.shape[0])
     for entry, label, vid in zip(mask_entry, labels, vids):
         plt.figure()
         plt.subplot(1, 2, 1)
@@ -198,6 +206,8 @@ def main():
         cnt += 1
 
     if args.debug:
+        # For printing
+        masks= {idx:[(int(class_idx), mask) for mask, class_idx in zip(out.masks.xy, out.boxes.cls) if model.names[int(class_idx)] in search_labels] if len(out.boxes.cls) > 0 else [] for idx, out in enumerate(outputs)}
         fig, axes = plt.subplots(2, 3)
         row_cnt = 0
         col_cnt = 0
