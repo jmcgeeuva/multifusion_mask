@@ -1,3 +1,18 @@
+
+# Copyright (c) OpenMMLab. All rights reserved.
+from __future__ import division
+
+import copy
+import warnings
+from mmcv.runner import get_dist_info, init_dist
+from os import path as osp
+
+from mmdet import __version__ as mmdet_version
+from mmdet3d import __version__ as mmdet3d_version
+from mmdet3d.apis import train_model
+from mmdet3d.utils import collect_env, get_root_logger
+from mmseg import __version__ as mmseg_version
+
 from mmcv import Config, DictAction
 from mmdet.apis import set_random_seed
 from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
@@ -368,53 +383,110 @@ def train_attack_single_gpu(model,
 
     return results
 
+def train_attack(
+    model, 
+    yolo_model, 
+    data_loaders, 
+    max_epochs=10,
+    allowed_words= ['car', 'bicycle', 'person'], 
+    cfg=None, 
+    img_size=(384, 1056), 
+    H=1056, 
+    W=1056, 
+    resolution=8):
+    
+
+    h, w = int(H/resolution), int(W/resolution)
+
+    ##################################### SETUP Transpose #############################################
+    expand_kernel = torch.nn.ConvTranspose2d(3, 3, resolution, stride=resolution, padding=0).to(model.device)
+    expand_kernel.weight.data.fill_(0)
+    expand_kernel.bias.data.fill_(0)
+    for i in range(3):
+        expand_kernel.weight[i, i, :, :].data.fill_(1)
+    ###################################################################################################
+
+    #####################################################################################
+    # continuous color
+    camou_para = torch.rand([1, h, w, 3]).float().to(model.device)
+    camou_para.requires_grad_(True)
+    begin_para = deepcopy(camou_para)
+    optimizer = optim.Adam([camou_para], lr=0.01)
+    camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+    #####################################################################################
+    
+    model.eval()
+    dataset = data_loaders.dataset
+    rank, world_size = get_dist_info()
+    if rank == 0:
+        prog_bar = mmcv.ProgressBar(len(dataset))
+    time.sleep(2)  # This line can prevent deadlock problem in some cases.
+    debug=False
+
+    for epoch in range(max_epochs):
+        for data in tqdm(data_loaders, total=len(data_loaders)): 
+            with torch.no_grad():
+                # imgs = data['img'][0].data[0]
+                # camou_trans = tex_trans(camou_para1, size=img_size)
+                loss = model(
+                    # return_loss=False, 
+                    rescale=True, 
+                    **data
+                    # points=data['points'],
+                    # img=mask_imgs(yolo_model, data, camou_para, debug=debug),
+                    # camera_intrinsics=data['camera_intrinsics'],
+                    # camera2ego=data['camera2ego'],
+                    # lidar2ego=data['lidar2ego'],
+                    # lidar2camera=data['lidar2camera'],
+                    # camera2lidar=data['camera2lidar'],
+                    # lidar2img=data['lidar2img'],
+                    # img_aug_matrix=data['img_aug_matrix'],
+                    # lidar_aug_matrix=data['lidar_aug_matrix'],
+                    # img_metas=data['img_metas']
+                )
+                import pdb; pdb.set_trace()
+
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description='MMDet test (and eval) a model')
-    parser.add_argument('config', help='test config file path')
-    parser.add_argument('checkpoint', help='checkpoint file')
-    parser.add_argument('--out', help='output result file in pickle format')
+    parser = argparse.ArgumentParser(description='Train a detector')
+    parser.add_argument('config', help='train config file path')
+    parser.add_argument('checkpoint', help='train config file path')
+    parser.add_argument('--work-dir', help='the dir to save logs and models')
+    parser.add_argument('--extra_tag', type=str, default=None, help='extra tag for this experiment')
     parser.add_argument(
         '--fuse-conv-bn',
         action='store_true',
         help='Whether to fuse conv and bn, this will slightly increase'
         'the inference speed')
     parser.add_argument(
-        '--format-only',
+        '--resume-from', help='the checkpoint file to resume from')
+    parser.add_argument(
+        '--no-validate',
         action='store_true',
-        help='Format the output results without perform evaluation. It is'
-        'useful when you want to format the result to a specific format and '
-        'submit it to the test server')
-    parser.add_argument(
-        '--result_dir', help='directory where results are saved')
-    parser.add_argument(
-        '--bs',
+        help='whether not to evaluate the checkpoint during training')
+    group_gpus = parser.add_mutually_exclusive_group()
+    group_gpus.add_argument(
+        '--gpus',
         type=int,
-        default=1,
-        help='batch size')
-    parser.add_argument(
-        '--eval',
-        type=str,
+        help='number of gpus to use '
+        '(only applicable to non-distributed training)')
+    group_gpus.add_argument(
+        '--gpu-ids',
+        type=int,
         nargs='+',
-        help='evaluation metrics, which depends on the dataset, e.g., "bbox",'
-        ' "segm", "proposal" for COCO, and "mAP", "recall" for PASCAL VOC')
-    parser.add_argument('--show', action='store_true', help='show results')
-    parser.add_argument('--show_bev', action='store_true', help='show bev results')
-    parser.add_argument(
-        '--show_dir', help='directory where results will be saved')
-    parser.add_argument(
-        '--gpu-collect',
-        action='store_true',
-        help='whether to use gpu to collect results.')
-    parser.add_argument(
-        '--tmpdir',
-        help='tmp directory used for collecting results from multiple '
-        'workers, available when gpu-collect is not specified')
+        help='ids of gpus to use '
+        '(only applicable to non-distributed training)')
     parser.add_argument('--seed', type=int, default=0, help='random seed')
     parser.add_argument(
         '--deterministic',
         action='store_true',
         help='whether to set deterministic options for CUDNN backend.')
+    parser.add_argument(
+        '--options',
+        nargs='+',
+        action=DictAction,
+        help='override some settings in the used config, the key-value pair '
+        'in xxx=yyy format will be merged into config file (deprecate), '
+        'change to --cfg-options instead.')
     parser.add_argument(
         '--cfg-options',
         nargs='+',
@@ -426,52 +498,32 @@ def parse_args():
         'Note that the quotation marks are necessary and that no white space '
         'is allowed.')
     parser.add_argument(
-        '--options',
-        nargs='+',
-        action=DictAction,
-        help='custom options for evaluation, the key-value pair in xxx=yyy '
-        'format will be kwargs for dataset.evaluate() function (deprecate), '
-        'change to --eval-options instead.')
-    parser.add_argument(
-        '--eval-options',
-        nargs='+',
-        action=DictAction,
-        help='custom options for evaluation, the key-value pair in xxx=yyy '
-        'format will be kwargs for dataset.evaluate() function')
-    parser.add_argument(
         '--launcher',
         choices=['none', 'pytorch', 'slurm', 'mpi'],
         default='none',
         help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
+    parser.add_argument(
+        '--autoscale-lr',
+        action='store_true',
+        help='automatically scale lr with the number of gpus')
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
 
-    if args.options and args.eval_options:
+    if args.options and args.cfg_options:
         raise ValueError(
-            '--options and --eval-options cannot be both specified, '
-            '--options is deprecated in favor of --eval-options')
+            '--options and --cfg-options cannot be both specified, '
+            '--options is deprecated in favor of --cfg-options')
     if args.options:
-        warnings.warn('--options is deprecated in favor of --eval-options')
-        args.eval_options = args.options
+        warnings.warn('--options is deprecated in favor of --cfg-options')
+        args.cfg_options = args.options
+
     return args
 
 
 def main():
     args = parse_args()
-
-    assert args.out or args.eval or args.format_only or args.show \
-        or args.show_dir, \
-        ('Please specify at least one operation (save/eval/format/show the '
-            'results / save the results) with the argument "--out", "--eval"'
-            ', "--format-only", "--show" or "--show-dir"')
-
-    if args.eval and args.format_only:
-        raise ValueError('--eval and --format_only cannot be both specified')
-
-    if args.out is not None and not args.out.endswith(('.pkl', '.pickle')):
-        raise ValueError('The output file must be a pkl file.')
 
     cfg = Config.fromfile(args.config)
     if args.cfg_options is not None:
@@ -480,55 +532,90 @@ def main():
     if cfg.get('custom_imports', None):
         from mmcv.utils import import_modules_from_strings
         import_modules_from_strings(**cfg['custom_imports'])
+
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
 
-    cfg.model.pretrained = None
-    cfg.data.test.update(dict(samples_per_gpu=args.bs))
+    # work_dir is determined in this priority: CLI > segment in file > filename
+    if args.work_dir is not None:
+        # update configs according to CLI args if args.work_dir is not None
+        cfg.work_dir = args.work_dir
+    elif cfg.get('work_dir', None) is None:
+        # use config filename as default work_dir if cfg.work_dir is None
+        cfg.work_dir = osp.join('./work_dirs',
+                                osp.splitext(osp.basename(args.config))[0])
 
-    # in case the test dataset is concatenated
-    samples_per_gpu = 1
-    if isinstance(cfg.data.test, dict):
-        cfg.data.test.test_mode = True
-        samples_per_gpu = cfg.data.test.pop('samples_per_gpu', 1)
-        if samples_per_gpu > 1:
-            # Replace 'ImageToTensor' to 'DefaultFormatBundle'
-            cfg.data.test.pipeline = replace_ImageToTensor(
-                cfg.data.test.pipeline)
-    elif isinstance(cfg.data.test, list):
-        for ds_cfg in cfg.data.test:
-            ds_cfg.test_mode = True
-        samples_per_gpu = max(
-            [ds_cfg.pop('samples_per_gpu', 1) for ds_cfg in cfg.data.test])
-        if samples_per_gpu > 1:
-            for ds_cfg in cfg.data.test:
-                ds_cfg.pipeline = replace_ImageToTensor(ds_cfg.pipeline)
+    if args.extra_tag is not None:
+        cfg.work_dir = osp.join(cfg.work_dir, args.extra_tag)
+
+    if args.resume_from is not None:
+        cfg.resume_from = args.resume_from
+    if args.gpu_ids is not None:
+        cfg.gpu_ids = args.gpu_ids
+    else:
+        cfg.gpu_ids = range(1) if args.gpus is None else range(args.gpus)
+
+    if args.autoscale_lr:
+        # apply the linear scaling rule (https://arxiv.org/abs/1706.02677)
+        cfg.optimizer['lr'] = cfg.optimizer['lr'] * len(cfg.gpu_ids) / 8
 
     # init distributed env first, since logger depends on the dist info.
     if args.launcher == 'none':
         distributed = False
-        cfg.data.workers_per_gpu = 1
     else:
         distributed = True
         init_dist(args.launcher, **cfg.dist_params)
+        # re-set gpu_ids with distributed training mode
+        _, world_size = get_dist_info()
+        cfg.gpu_ids = range(world_size)
+
+    # create work_dir
+    mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
+    # dump config
+    cfg.dump(osp.join(cfg.work_dir, osp.basename(args.config)))
+    # init the logger before other steps
+    timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
+    log_file = osp.join(cfg.work_dir, f'{timestamp}.log')
+    # specify logger name, if we still use 'mmdet', the output info will be
+    # filtered and won't be saved in the log_file
+    # TODO: ugly workaround to judge whether we are training det or seg model
+    if cfg.model.type in ['EncoderDecoder3D']:
+        logger_name = 'mmseg'
+    else:
+        logger_name = 'mmdet'
+    logger = get_root_logger(
+        log_file=log_file, log_level=cfg.log_level, name=logger_name)
+
+    # init the meta dict to record some important information such as
+    # environment info and seed, which will be logged
+    meta = dict()
+    # log env info
+    env_info_dict = collect_env()
+    env_info = '\n'.join([(f'{k}: {v}') for k, v in env_info_dict.items()])
+    dash_line = '-' * 60 + '\n'
+    logger.info('Environment info:\n' + dash_line + env_info + '\n' +
+                dash_line)
+    meta['env_info'] = env_info
+    meta['config'] = cfg.pretty_text
+
+    # log some basic info
+    logger.info(f'Distributed training: {distributed}')
+    logger.info(f'Config:\n{cfg.pretty_text}')
 
     # set random seeds
     if args.seed is not None:
+        logger.info(f'Set random seed to {args.seed}, '
+                    f'deterministic: {args.deterministic}')
         set_random_seed(args.seed, deterministic=args.deterministic)
+    cfg.seed = args.seed
+    meta['seed'] = args.seed
+    meta['exp_name'] = osp.basename(args.config)
 
-    # build the dataloader
-    # export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
-    dataset = build_dataset(cfg.data.test)
-    data_loader = build_dataloader(
-        dataset,
-        samples_per_gpu=samples_per_gpu,
-        workers_per_gpu=cfg.data.workers_per_gpu,
-        dist=distributed,
-        shuffle=False)
-
-    cfg.model.train_cfg = None
-    model = build_model(cfg.model, test_cfg=cfg.get('test_cfg'))
+    model = build_model(
+        cfg.model,
+        train_cfg=cfg.get('train_cfg'),
+        test_cfg=cfg.get('test_cfg'))
     fp16_cfg = cfg.get('fp16', None)
     if fp16_cfg is not None:
         wrap_fp16_model(model)
@@ -548,47 +635,212 @@ def main():
         # segmentation dataset has `PALETTE` attribute
         model.PALETTE = dataset.PALETTE
 
+    def load_words(file_name):
+        allowed_words = []
+        with open(file_name) as f:
+            for line in f:
+                line = line.replace('\n', '')
+                allowed_words.append(line)
+        return allowed_words
 
+    allowed_words = load_words('./allowed_words.txt')
+
+    logger.info(f'Model:\n{model}')
+    logger = get_root_logger(cfg.log_level)
+    
+    
+    datasets = build_dataset(cfg.data.train)
+    if 'imgs_per_gpu' in cfg.data:
+        logger.warning('"imgs_per_gpu" is deprecated in MMDet V2.0. '
+                       'Please use "samples_per_gpu" instead')
+        if 'samples_per_gpu' in cfg.data:
+            logger.warning(
+                f'Got "imgs_per_gpu"={cfg.data.imgs_per_gpu} and '
+                f'"samples_per_gpu"={cfg.data.samples_per_gpu}, "imgs_per_gpu"'
+                f'={cfg.data.imgs_per_gpu} is used in this experiments')
+        else:
+            logger.warning(
+                'Automatically set "samples_per_gpu"="imgs_per_gpu"='
+                f'{cfg.data.imgs_per_gpu} in this experiments')
+        cfg.data.samples_per_gpu = cfg.data.imgs_per_gpu
+
+    # data_loaders = build_dataloader(
+    #     datasets,
+    #     samples_per_gpu=1,
+    #     workers_per_gpu=cfg.data.workers_per_gpu,
+    #     dist=distributed,
+    #     shuffle=False
+    # )
+    data_loaders = build_dataloader(
+        datasets,
+        cfg.data.samples_per_gpu,
+        cfg.data.workers_per_gpu,
+        # cfg.gpus will be ignored if distributed
+        len(cfg.gpu_ids),
+        dist=distributed,
+        seed=cfg.seed
+    )
+
+    # put model on gpus
     if not distributed:
-        model = MMDataParallel(model.cuda(), device_ids=[torch.cuda.current_device()])
-        train_attack_single_gpu(model, data_loader)
+        model = MMDataParallel(
+            model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
     else:
+        find_unused_parameters = cfg.get('find_unused_parameters', False)
+        # Sets the `find_unused_parameters` parameter in
+        # torch.nn.parallel.DistributedDataParallel
         model = MMDistributedDataParallel(
             model.cuda(),
             device_ids=[torch.cuda.current_device()],
-            broadcast_buffers=False)
-        yolo_model=YOLO('yolov8n-seg.pt')
-        outputs = train_attack_multi_gpu(
-            model=model,
-            yolo_model=yolo_model, 
-            data_loader=data_loader, 
-            tmpdir=args.tmpdir,
-            gpu_collect=args.gpu_collect, 
-            cfg=cfg
-        )
+            broadcast_buffers=False,
+            find_unused_parameters=find_unused_parameters)
 
-    rank, _ = get_dist_info()
-    if rank == 0:
-        if args.out:
-            print(f'\nwriting results to {args.out}')
-            mmcv.dump(outputs, args.out)
-            # outputs = mmcv.load(args.out)
-        kwargs = {} if args.eval_options is None else args.eval_options
-        if args.format_only:
-            dataset.format_results(outputs, **kwargs)
-        if args.eval:
-            eval_kwargs = cfg.get('evaluation', {}).copy()
-            # hard-code way to remove EvalHook args
-            for key in [
-                    'interval', 'tmpdir', 'start', 'gpu_collect', 'save_best',
-                    'rule'
-            ]:
-                eval_kwargs.pop(key, None)
-            eval_kwargs.update(dict(metric=args.eval, **kwargs))
-            if args.result_dir is not None:
-                eval_kwargs.update(pklfile_prefix=os.path.dirname(args.result_dir))
-            print(dataset.evaluate(outputs, **eval_kwargs))
-
+    max_epochs=1
+    yolo_model=YOLO('yolov8n-seg.pt')
+    outputs = train_attack(
+        model=model,
+        yolo_model=yolo_model, 
+        data_loaders=data_loaders,
+        max_epochs=max_epochs,
+        allowed_words=allowed_words, 
+        cfg=cfg
+    )
 
 if __name__ == '__main__':
     main()
+
+
+# def main():
+#     args = parse_args()
+
+#     assert args.out or args.eval or args.format_only or args.show \
+#         or args.show_dir, \
+#         ('Please specify at least one operation (save/eval/format/show the '
+#             'results / save the results) with the argument "--out", "--eval"'
+#             ', "--format-only", "--show" or "--show-dir"')
+
+#     if args.eval and args.format_only:
+#         raise ValueError('--eval and --format_only cannot be both specified')
+
+#     if args.out is not None and not args.out.endswith(('.pkl', '.pickle')):
+#         raise ValueError('The output file must be a pkl file.')
+
+#     cfg = Config.fromfile(args.config)
+#     if args.cfg_options is not None:
+#         cfg.merge_from_dict(args.cfg_options)
+#     # import modules from string list.
+#     if cfg.get('custom_imports', None):
+#         from mmcv.utils import import_modules_from_strings
+#         import_modules_from_strings(**cfg['custom_imports'])
+#     # set cudnn_benchmark
+#     if cfg.get('cudnn_benchmark', False):
+#         torch.backends.cudnn.benchmark = True
+
+#     cfg.model.pretrained = None
+#     cfg.data.test.update(dict(samples_per_gpu=args.bs))
+
+#     # in case the test dataset is concatenated
+#     samples_per_gpu = 1
+#     if isinstance(cfg.data.test, dict):
+#         cfg.data.test.test_mode = True
+#         samples_per_gpu = cfg.data.test.pop('samples_per_gpu', 1)
+#         if samples_per_gpu > 1:
+#             # Replace 'ImageToTensor' to 'DefaultFormatBundle'
+#             cfg.data.test.pipeline = replace_ImageToTensor(
+#                 cfg.data.test.pipeline)
+#     elif isinstance(cfg.data.test, list):
+#         for ds_cfg in cfg.data.test:
+#             ds_cfg.test_mode = True
+#         samples_per_gpu = max(
+#             [ds_cfg.pop('samples_per_gpu', 1) for ds_cfg in cfg.data.test])
+#         if samples_per_gpu > 1:
+#             for ds_cfg in cfg.data.test:
+#                 ds_cfg.pipeline = replace_ImageToTensor(ds_cfg.pipeline)
+
+#     # init distributed env first, since logger depends on the dist info.
+#     if args.launcher == 'none':
+#         distributed = False
+#         cfg.data.workers_per_gpu = 1
+#     else:
+#         distributed = True
+#         init_dist(args.launcher, **cfg.dist_params)
+
+#     # set random seeds
+#     if args.seed is not None:
+#         set_random_seed(args.seed, deterministic=args.deterministic)
+
+#     # build the dataloader
+#     # export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
+#     dataset = build_dataset(cfg.data.test)
+#     data_loader = build_dataloader(
+#         dataset,
+#         samples_per_gpu=samples_per_gpu,
+#         workers_per_gpu=cfg.data.workers_per_gpu,
+#         dist=distributed,
+#         shuffle=False)
+
+#     cfg.model.train_cfg = None
+#     model = build_model(cfg.model, test_cfg=cfg.get('test_cfg'))
+#     fp16_cfg = cfg.get('fp16', None)
+#     if fp16_cfg is not None:
+#         wrap_fp16_model(model)
+#     checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
+#     if args.fuse_conv_bn:
+#         model = fuse_conv_bn(model)
+#     # old versions did not save class info in checkpoints, this walkaround is
+#     # for backward compatibility
+#     if 'CLASSES' in checkpoint.get('meta', {}):
+#         model.CLASSES = checkpoint['meta']['CLASSES']
+#     else:
+#         model.CLASSES = dataset.CLASSES
+#     # palette for visualization in segmentation tasks
+#     if 'PALETTE' in checkpoint.get('meta', {}):
+#         model.PALETTE = checkpoint['meta']['PALETTE']
+#     elif hasattr(dataset, 'PALETTE'):
+#         # segmentation dataset has `PALETTE` attribute
+#         model.PALETTE = dataset.PALETTE
+
+
+#     if not distributed:
+#         model = MMDataParallel(model.cuda(), device_ids=[torch.cuda.current_device()])
+#         train_attack_single_gpu(model, data_loader)
+#     else:
+#         model = MMDistributedDataParallel(
+#             model.cuda(),
+#             device_ids=[torch.cuda.current_device()],
+#             broadcast_buffers=False)
+#         yolo_model=YOLO('yolov8n-seg.pt')
+#         outputs = train_attack_multi_gpu(
+#             model=model,
+#             yolo_model=yolo_model, 
+#             data_loader=data_loader, 
+#             tmpdir=args.tmpdir,
+#             gpu_collect=args.gpu_collect, 
+#             cfg=cfg
+#         )
+
+#     rank, _ = get_dist_info()
+#     if rank == 0:
+#         if args.out:
+#             print(f'\nwriting results to {args.out}')
+#             mmcv.dump(outputs, args.out)
+#             # outputs = mmcv.load(args.out)
+#         kwargs = {} if args.eval_options is None else args.eval_options
+#         if args.format_only:
+#             dataset.format_results(outputs, **kwargs)
+#         if args.eval:
+#             eval_kwargs = cfg.get('evaluation', {}).copy()
+#             # hard-code way to remove EvalHook args
+#             for key in [
+#                     'interval', 'tmpdir', 'start', 'gpu_collect', 'save_best',
+#                     'rule'
+#             ]:
+#                 eval_kwargs.pop(key, None)
+#             eval_kwargs.update(dict(metric=args.eval, **kwargs))
+#             if args.result_dir is not None:
+#                 eval_kwargs.update(pklfile_prefix=os.path.dirname(args.result_dir))
+#             print(dataset.evaluate(outputs, **eval_kwargs))
+
+
+# if __name__ == '__main__':
+#     main()
