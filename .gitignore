@@ -2,3 +2,5 @@
 **/mmcv
 **/mmdetection3d
 **.pt
+
+**/__pycache__/**

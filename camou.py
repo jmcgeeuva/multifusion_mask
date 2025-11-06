@@ -389,7 +389,7 @@ def overlay_image(image, mask):
     plt.figure()
     plt.subplot(1, 2, 1)
     contour = torch.where((mask == 1), torch.zeros(1), torch.ones(1))
-    tmp = torch.where((contour == 1.), transforms.ToTensor()(image), transforms.ToTensor()(lily_img))
+    tmp = torch.where((contour == 1.), image, transforms.ToTensor()(lily_img))
     plt.imshow(tmp.permute(1,2, 0))
     plt.title('car')
     plt.axis('off')
