@@ -195,7 +195,7 @@ def train_attack_multi_gpu(model, yolo_model, data_loader, allowed_words= ['car'
     if rank == 0:
         prog_bar = mmcv.ProgressBar(len(dataset))
     time.sleep(2)  # This line can prevent deadlock problem in some cases.
-    debug=True
+    debug=False
 
     for i, data in enumerate(data_loader):
         with torch.no_grad():
