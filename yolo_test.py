@@ -13,6 +13,7 @@ import argparse
 from torchvision import transforms
 import torch
 import copy
+# export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
 
 def plot_bbox(image, bboxes, labels, name='test.png', print_label=True):
    # Create a figure and axes  
@@ -173,17 +174,30 @@ def run_yolo8(model, tensor_list, width, height, search_labels= ['car', 'bicycle
     # if this input is BxAxCxHxW first rearrange to (BA)xCxHxW
     b, a, c, h, w = tensor_list.shape
     tensor_list = tensor_list.view(b*a, c, h, w)
-    outputs = model(tensor_list)
+    outputs = model(tensor_list, verbose=False)
 
     masks = [[(int(class_idx), mask, video_id) for mask, class_idx in zip(out.masks.data, out.boxes.cls) if model.names[int(class_idx)] in search_labels] 
              for video_id, out in enumerate(outputs) if len(out.boxes.cls) > 0]
 
+    labels =    [mask_tup[0] for entry in masks for mask_tup in entry]
     mask_list = [mask_tup[1] for entry in masks for mask_tup in entry]
-    labels = [mask_tup[0] for entry in masks for mask_tup in entry]
-    vids = [mask_tup[2] for entry in masks for mask_tup in entry]
-    mask_entry = torch.stack(mask_list)
+    vids =      [mask_tup[2] for entry in masks for mask_tup in entry]
 
-    return mask_entry, labels, vids
+    return mask_list, labels, vids
+
+def plot_masks(mask_entry, labels, vids, orig_images):
+    cnt = 0
+    fig, axes = plt.subplots(2, mask_entry.shape[0])
+    for entry, label, vid in zip(mask_entry, labels, vids):
+        plt.figure()
+        plt.subplot(1, 2, 1)
+        plt.imshow(transforms.ToPILImage()(entry))
+        plt.axis('off')
+        plt.subplot(1, 2, 2)
+        plt.imshow(transforms.ToPILImage()(orig_images[vid]))
+        plt.axis('off')
+        plt.savefig(f'test{cnt}.png')
+        cnt += 1
 
 def main():
     parser = argparse.ArgumentParser()
@@ -215,18 +229,7 @@ def main():
 
     mask_entry, labels, vids = run_yolo8(model, tensor_list.unsqueeze(dim=0), image.width, image.height)
     
-    cnt = 0
-    fig, axes = plt.subplots(2, mask_entry.shape[0])
-    for entry, label, vid in zip(mask_entry, labels, vids):
-        plt.figure()
-        plt.subplot(1, 2, 1)
-        plt.imshow(transforms.ToPILImage()(entry))
-        plt.axis('off')
-        plt.subplot(1, 2, 2)
-        plt.imshow(transforms.ToPILImage()(orig_images[vid]))
-        plt.axis('off')
-        plt.savefig(f'test{cnt}.png')
-        cnt += 1
+    plot_masks(mask_entry, labels, vids)
 
     if args.debug:
         # For printing
