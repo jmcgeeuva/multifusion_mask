@@ -6,6 +6,7 @@ import copy
 import warnings
 from mmcv.runner import get_dist_info, init_dist
 from os import path as osp
+import cv2
 
 from mmdet import __version__ as mmdet_version
 from mmdet3d import __version__ as mmdet3d_version
@@ -38,6 +39,7 @@ import time
 from copy import deepcopy
 from torch import optim
 import numpy as np
+from datetime import datetime
 # export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
 
 def plot_bbox(image, bboxes, labels, print_labels=False, name='test.png'):
@@ -162,11 +164,15 @@ def tex_trans(camou, size=4096):
     camou_crop = transforms.RandomCrop(size)(camou_full).permute(0, 2, 3, 1)
     return camou_crop
             
-def mask_imgs(yolo_model, imgs, camou_para, allowed_words, ratio_check=2e-3, debug=False):
+def mask_imgs(yolo_model, imgs, camou_para, allowed_words, num_samples = 1, ratio_check=2e-3, debug=False):
     
     if debug:
-        print_images(imgs, 0, norm=False, name='dark.png')
-        print_images(imgs, 0, norm=True, name='norm.png')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        directory_name = f"output_imgs_{timestamp}"
+        os.makedirs(directory_name, exists_ok=True)
+        print(f"Directory '{directory_name}' created.")
+        print_images(imgs, 0, norm=False, name=f'{directory_name}/dark.png')
+        print_images(imgs, 0, norm=True, name=f'{directory_name}/norm.png')
     
     range_num = imgs.max() - imgs.min()
     min_num = imgs.min()
@@ -192,7 +198,7 @@ def mask_imgs(yolo_model, imgs, camou_para, allowed_words, ratio_check=2e-3, deb
         ratio_indices = (ratio > ratio_check).nonzero(as_tuple=True)[0]
         if ratio_indices.numel() != 0:
             if debug:
-                plot_masks(masks, labels, batches, imgs[0])
+                plot_masks(masks, labels, batches, angles, imgs, name=directory_name+'/test{}.png')
             
             
             H, W = imgs_norm.shape[-2], imgs_norm.shape[-1]  # example shape
@@ -208,8 +214,6 @@ def mask_imgs(yolo_model, imgs, camou_para, allowed_words, ratio_check=2e-3, deb
 
             # Have to switch to cpu because it does not handle small tensors well 
             for i in range(imgs.shape[0]):
-                # if i == 3:
-                #     import pdb; pdb.set_trace()
                 t = torch.nonzero(torch.tensor(batches) == i).flatten()
 
                 tmp_angles = torch.tensor(angles)[t]
@@ -219,13 +223,14 @@ def mask_imgs(yolo_model, imgs, camou_para, allowed_words, ratio_check=2e-3, deb
                 # FIXME when prob is empty the sum of the probability is 0 and this throws an error
                 if len(prob) == 0:
                     continue
-                r_idx = torch.multinomial(prob.cpu(), 1, replacement=True).to(prob.device)
+                
+                r_idx = torch.multinomial(prob.cpu(), num_samples, replacement=True).to(prob.device)
 
                 imgs_tmp = imgs_processed[t][ratio_indices].to(device=imgs.device)
                 choice = ratio_indices[r_idx]
                 imgs[i, tmp_angles[choice], :, :, :] = imgs_tmp[r_idx, :, :, :]
         if debug:
-            print_images(imgs, 0, norm=True, name='masked.png')
+            print_images(imgs.detach(), 0, norm=True, name=f'{directory_name}/masked.png')
             labels = [yolo_model.names[label] for i, label in enumerate(labels) if i in ratio_indices]
             batches = [label for i, label in enumerate(batches) if i in ratio_indices]
             angles = [label for i, label in enumerate(angles) if i in ratio_indices]
@@ -240,13 +245,34 @@ def mask_imgs(yolo_model, imgs, camou_para, allowed_words, ratio_check=2e-3, deb
             plt.imshow(masks[0].cpu().detach().numpy())
             plt.title(f'mask')
             plt.axis('off')
-            plt.savefig('overlay.png')
+            plt.savefig(f'{directory_name}/overlay.png')
     return [DC([imgs], stack=False, cpu_only=False)]
+
+def loss_smooth(img):
+    b, c, w, h = img.shape
+    s1 = torch.pow(img[:, :, 1:, :-1] - img[:, :, :-1, :-1], 2)
+    s2 = torch.pow(img[:, :, :-1, 1:] - img[:, :, :-1, :-1], 2)
+    return torch.square(torch.sum(s1 + s2)) / (b*c*w*h)
+    
+
+def loss_nps(img, color_set):
+    # img: [batch_size, h, w, 3]
+    # color_set: [color_num, 3]
+    _, h, w, c = img.shape
+    color_num, c = color_set.shape
+    img1 = img.unsqueeze(1)
+    color_set1 = color_set.unsqueeze(1).unsqueeze(1).unsqueeze(0)
+    gap = torch.min(torch.sum(torch.abs(img1 - color_set1)/255, -1), 1).values
+    return torch.sum(gap)/h/w
 
 def train_attack(
     model, 
     yolo_model, 
     data_loaders, 
+    rank,
+    world_size,
+    num_samples=1,
+    bias=10,
     max_epochs=10,
     allowed_words= ['car', 'bicycle', 'person'], 
     cfg=None, 
@@ -266,53 +292,71 @@ def train_attack(
         expand_kernel.weight[i, i, :, :].data.fill_(1)
     ###################################################################################################
 
+    dataset = data_loaders.dataset
+    if rank == 0:
+        prog_bar = mmcv.ProgressBar(len(dataset))
+
     #####################################################################################
     # continuous color
     camou_para = torch.rand([1, h, w, 3]).float().to(model.device)
     camou_para.requires_grad_(True)
     begin_para = deepcopy(camou_para)
-    optimizer = optim.Adam([camou_para], lr=0.01)
     camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+    optimizer = optim.Adam([camou_para], lr=0.01)
+    
+    if rank == 0:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        directory_name = f"paras/paras_{timestamp}"
+        os.makedirs(directory_name, exist_ok=True)
+        try:
+            camou_png = cv2.cvtColor((camou_para1[0].detach().cpu().numpy()*255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+            cv2.imwrite(directory_name+'/begin_para.png', camou_png)
+            np.save(directory_name+'/begin_para.npy', begin_para.detach().cpu().numpy())
+        except:
+            print(f"failed to print or save ./ {epoch}")
     #####################################################################################
     
-    model.eval()
-    dataset = data_loaders.dataset
-    rank, world_size = get_dist_info()
-    if rank == 0:
-        prog_bar = mmcv.ProgressBar(len(dataset))
+    # model.eval()
     time.sleep(2)  # This line can prevent deadlock problem in some cases.
     debug=False
 
+    model.module.detach = False
     for epoch in range(max_epochs):
+        model.train()
+        running_loss = 0
         for data in tqdm(data_loaders, total=len(data_loaders)): 
+            optimizer.zero_grad(set_to_none=True)
+            
             imgs = data['img'].data[0]
             camou_trans = tex_trans(camou_para1, size=img_size)
-            learned_camou = mask_imgs(yolo_model, imgs, camou_trans, allowed_words, debug=debug)[0]
-            with torch.no_grad():
-                loss = model(
-                    # return_loss=False, 
-
-                    rescale=True, 
-                    points=data['points'],
-                    img=learned_camou,
-                    gt_bboxes_3d=data['gt_bboxes_3d'],
-                    gt_labels_3d=data['gt_labels_3d'],
-                    camera_intrinsics=data['camera_intrinsics'],
-                    camera2ego=data['camera2ego'],
-                    lidar2ego=data['lidar2ego'],
-                    lidar2camera=data['lidar2camera'],
-                    camera2lidar=data['camera2lidar'],
-                    lidar2img=data['lidar2img'],
-                    img_aug_matrix=data['img_aug_matrix'],
-                    lidar_aug_matrix=data['lidar_aug_matrix'],
-                    img_metas=data['img_metas']
-                )
-            total_loss = 1 - (loss['loss_heatmap'] + loss['layer_-1_loss_cls'] + loss['layer_-1_loss_bbox'] + loss['matched_ious'])
+            learned_camou = mask_imgs(yolo_model, imgs, camou_trans, allowed_words, num_samples=num_samples, debug=debug)[0]
+            assert learned_camou.data[0].requires_grad, "Learned_camou does not require gradient"
+            
+            data['img'] = learned_camou
+            
+            # losses = model(return_loss=True, **data)
+            out = model.train_step(data, optimizer)
+            loss_tensor = out['loss']
+            lambda_reduce = 1
+            lambda_smooth = .6
+            lambda_nps = .1
+            total_loss = lambda_reduce*(bias - (loss_tensor))
+            total_loss = total_loss + lambda_smooth*(loss_smooth(img))
+            total_loss = total_loss + lambda_nps*(loss_nps(camou_para, color_set) * 5)
             total_loss.backward()
+            running_loss += total_loss.item()
             optimizer.step()
             camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
-            # SAVE CAMOU HERE
-        # SAVE CAMOU AS IMAGE HERE
+            camou_para1 = torch.clamp(camou_para1, 0, 1)
+        camou_png = cv2.cvtColor((camou_para1[0].detach().cpu().numpy()*255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+        if rank == 0:
+            print(f'Current loss: {running_loss/len(data_loaders)}')
+            try:
+                cv2.imwrite(directory_name+'/'+str(epoch)+'camou.png', camou_png)
+                np.save(directory_name+'/'+str(epoch)+'camou.npy', camou_para.detach().cpu().numpy())
+            except:
+                print(f"failed to print or save ./ {epoch}")
+                raise
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
@@ -556,12 +600,20 @@ def main():
             broadcast_buffers=False,
             find_unused_parameters=find_unused_parameters)
 
-    max_epochs=1
-    yolo_model=YOLO('yolov8n-seg.pt')
+    for param in model.parameters():
+        param.requires_grad = False
+
+    max_epochs=100
+    num_samples=1
+    rank, world_size = get_dist_info()
+    yolo_model=YOLO(f'yolo/yolo{rank}/yolov8n-seg.pt')
     outputs = train_attack(
         model=model,
         yolo_model=yolo_model, 
         data_loaders=data_loaders,
+        rank=rank,
+        world_size=world_size,
+        num_samples=num_samples,
         max_epochs=max_epochs,
         allowed_words=allowed_words, 
         cfg=cfg

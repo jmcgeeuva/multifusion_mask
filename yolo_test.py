@@ -186,18 +186,18 @@ def run_yolo8(model, tensor_list, width, height, search_labels= ['car', 'bicycle
 
     return mask_list, labels, batches, angles
 
-def plot_masks(mask_entry, labels, vids, orig_images):
+def plot_masks(mask_entry, labels, batches, angles, orig_images, name='test{}.png'):
     cnt = 0
     fig, axes = plt.subplots(2, mask_entry.shape[0])
-    for entry, label, vid in zip(mask_entry, labels, vids):
+    for entry, label, batch, angle in zip(mask_entry, labels, batches, angles):
         plt.figure()
         plt.subplot(1, 2, 1)
         plt.imshow(transforms.ToPILImage()(entry))
         plt.axis('off')
         plt.subplot(1, 2, 2)
-        plt.imshow(transforms.ToPILImage()(orig_images[vid]))
+        plt.imshow(transforms.ToPILImage()(orig_images[batch, angle]))
         plt.axis('off')
-        plt.savefig(f'test{cnt}.png')
+        plt.savefig(name.format(cnt))
         cnt += 1
 
 def main():
