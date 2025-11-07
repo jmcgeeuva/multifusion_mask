@@ -161,98 +161,8 @@ def tex_trans(camou, size=4096):
     camou_full = torch.cat(tuple(camou_column), 2).unsqueeze(0)
     camou_crop = transforms.RandomCrop(size)(camou_full).permute(0, 2, 3, 1)
     return camou_crop
-
-def train_attack_multi_gpu(model, yolo_model, data_loader, cfg=None, img_size=(384, 1056), H=1056, W=1056, resolution=8, tmpdir=None, gpu_collect=False):
-    """Test model with multiple gpus.
-
-    This method tests model with multiple gpus and collects the results
-    under two different modes: gpu and cpu modes. By setting 'gpu_collect=True'
-    it encodes results to gpu tensors and use gpu communication for results
-    collection. On cpu mode it saves the results on different gpus to 'tmpdir'
-    and collects them by the rank 0 worker.
-
-    Args:
-        model (nn.Module): Model to be tested.
-        data_loader (nn.Dataloader): Pytorch data loader.
-        tmpdir (str): Path of directory to save the temporary results from
-            different gpus under cpu mode.
-        gpu_collect (bool): Option to use either gpu or cpu to collect results.
-
-    Returns:
-        list: The prediction results.
-    """
-    
-    h, w = int(H/resolution), int(W/resolution)
-
-    ##################################### SETUP Transpose #############################################
-    expand_kernel = torch.nn.ConvTranspose2d(3, 3, resolution, stride=resolution, padding=0).to(model.device)
-    expand_kernel.weight.data.fill_(0)
-    expand_kernel.bias.data.fill_(0)
-    for i in range(3):
-        expand_kernel.weight[i, i, :, :].data.fill_(1)
-    ###################################################################################################
-
-    #####################################################################################
-    # continuous color
-    camou_para = torch.rand([1, cfg.img_scale[0], cfg.img_scale[1], 3]).float().to(model.device)
-    camou_para.requires_grad_(True)
-    begin_para = deepcopy(camou_para)
-    optimizer = optim.Adam([camou_para], lr=0.01)
-    camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
-    #####################################################################################
-
-
-
-    model.eval()
-    results = []
-    dataset = data_loader.dataset
-    rank, world_size = get_dist_info()
-    if rank == 0:
-        prog_bar = mmcv.ProgressBar(len(dataset))
-    time.sleep(2)  # This line can prevent deadlock problem in some cases.
-    debug=True
-    import pdb; pdb.set_trace()
-    for i, data in enumerate(data_loader):
-        with torch.no_grad():
-            imgs = data['img'][0].data[0]
-            camou_trans = tex_trans(camou_para1, size=img_size)
-            result = model(
-                return_loss=False,  # FIXME turn this to true and the whole thing explodes
-                rescale=True, 
-                points=data['points'],
-                img=mask_imgs(yolo_model, imgs, camou_trans, debug=debug),
-                camera_intrinsics=data['camera_intrinsics'],
-                camera2ego=data['camera2ego'],
-                lidar2ego=data['lidar2ego'],
-                lidar2camera=data['lidar2camera'],
-                camera2lidar=data['camera2lidar'],
-                lidar2img=data['lidar2img'],
-                img_aug_matrix=data['img_aug_matrix'],
-                lidar_aug_matrix=data['lidar_aug_matrix'],
-                img_metas=data['img_metas']
-            )
-            # result = model(return_loss=False, rescale=True, **data)
-            # encode mask results
-            if isinstance(result[0], tuple):
-                result = [(bbox_results, encode_mask_results(mask_results))
-                          for bbox_results, mask_results in result]
-
-        results.extend(result)
-
-        if rank == 0:
-            batch_size = len(result)
-            for _ in range(batch_size * world_size):
-                prog_bar.update()
-
-    # collect results from all ranks
-    if gpu_collect:
-        results = collect_results_gpu(results, len(dataset))
-    else:
-        results = collect_results_cpu(results, len(dataset), tmpdir)
-    return results
-
             
-def mask_imgs(yolo_model, imgs, camou_para, ratio_check=2e-3, debug=False):
+def mask_imgs(yolo_model, imgs, camou_para, allowed_words, ratio_check=2e-3, debug=False):
     
     if debug:
         print_images(imgs, 0, norm=False, name='dark.png')
@@ -260,13 +170,15 @@ def mask_imgs(yolo_model, imgs, camou_para, ratio_check=2e-3, debug=False):
     
     range_num = imgs.max() - imgs.min()
     min_num = imgs.min()
+    # B x 6 x 3 x H x W
     imgs_norm = (imgs - min_num) / (range_num)
     # imgs = torch.nn.functional(img, size=())
-    mask_entry, labels, vids = run_yolo8(
+    mask_entry, labels, batches, angles = run_yolo8(
             yolo_model, 
             imgs_norm, 
             imgs_norm.shape[-2], 
-            imgs_norm.shape[-1]
+            imgs_norm.shape[-1],
+            search_labels=allowed_words
     )
     
     imgs_processed = imgs
@@ -280,32 +192,45 @@ def mask_imgs(yolo_model, imgs, camou_para, ratio_check=2e-3, debug=False):
         ratio_indices = (ratio > ratio_check).nonzero(as_tuple=True)[0]
         if ratio_indices.numel() != 0:
             if debug:
-                plot_masks(masks, labels, vids, imgs[0])
+                plot_masks(masks, labels, batches, imgs[0])
             
             
-            H, W = imgs_norm[0].shape[-2], imgs_norm[0].shape[-1]  # example shape
+            H, W = imgs_norm.shape[-2], imgs_norm.shape[-1]  # example shape
             # green = torch.zeros(3, H, W)
             # green[1, :, :] = 1.0  # set G channel to 1
             # lily_img = Image.open('./Lily.jpg').resize((imgs_norm[0].shape[-1], imgs_norm[0].shape[-2]))
             # lily_img = transforms.ToTensor()(lily_img)
-            imgs_overlayed = overlay_image(imgs_norm[0][vids], masks.unsqueeze(1).repeat(1, 3, 1, 1), camou_para.permute(0, 3, 1, 2))
+            imgs_overlayed = overlay_image(imgs_norm[batches, angles, :, :], masks.unsqueeze(1).repeat(1, 3, 1, 1), camou_para.permute(0, 3, 1, 2))
 
             # unnormalize
             imgs_processed = (imgs_overlayed * range_num) + min_num
-            imgs_processed = imgs_processed[ratio_indices].to(device=imgs.device)
-            bboxes = bboxes[ratio_indices]
 
-            prob = ratio[ratio_indices] / ratio[ratio_indices].sum()
-            # Have to switch to cpu because it does not handle small tensors well
-            r_idx = torch.multinomial(prob.cpu(), 1, replacement=True).to(prob.device)
-            choice = ratio_indices[r_idx]
-            imgs[:, vids[choice], :, :, :] = imgs_processed[r_idx]
 
+            # Have to switch to cpu because it does not handle small tensors well 
+            for i in range(imgs.shape[0]):
+                # if i == 3:
+                #     import pdb; pdb.set_trace()
+                t = torch.nonzero(torch.tensor(batches) == i).flatten()
+
+                tmp_angles = torch.tensor(angles)[t]
+                
+                ratio_indices = (ratio[t] > ratio_check).nonzero(as_tuple=True)[0]
+                prob = (ratio[ratio_indices] / ratio[ratio_indices].sum())
+                # FIXME when prob is empty the sum of the probability is 0 and this throws an error
+                if len(prob) == 0:
+                    continue
+                r_idx = torch.multinomial(prob.cpu(), 1, replacement=True).to(prob.device)
+
+                imgs_tmp = imgs_processed[t][ratio_indices].to(device=imgs.device)
+                choice = ratio_indices[r_idx]
+                imgs[i, tmp_angles[choice], :, :, :] = imgs_tmp[r_idx, :, :, :]
         if debug:
             print_images(imgs, 0, norm=True, name='masked.png')
             labels = [yolo_model.names[label] for i, label in enumerate(labels) if i in ratio_indices]
-            vids = [label for i, label in enumerate(vids) if i in ratio_indices]
-            plot_bbox(imgs_norm[0][vids][0], [bboxes[0]], [labels[0]])
+            batches = [label for i, label in enumerate(batches) if i in ratio_indices]
+            angles = [label for i, label in enumerate(angles) if i in ratio_indices]
+            bboxes = bboxes[ratio_indices]
+            plot_bbox(imgs_norm[batches, angles, :, :][0], [bboxes[0]], [labels[0]])
             plt.figure()
             plt.subplot(1, 2, 1)
             plt.imshow(imgs_processed[0].permute(1,2, 0).cpu().detach().numpy())
@@ -317,71 +242,6 @@ def mask_imgs(yolo_model, imgs, camou_para, ratio_check=2e-3, debug=False):
             plt.axis('off')
             plt.savefig('overlay.png')
     return [DC([imgs], stack=False, cpu_only=False)]
-
-def train_attack_single_gpu(model,
-                    data_loader,
-                    show=False,
-                    out_dir=None,
-                    show_score_thr=0.3,
-                    ratio_check=2e-3):
-    """Test model with single gpu.
-
-    This method tests model with single gpu and gives the 'show' option.
-    By setting ``show=True``, it saves the visualization results under
-    ``out_dir``.
-
-    Args:
-        model (nn.Module): Model to be tested.
-        data_loader (nn.Dataloader): Pytorch data loader.
-        show (bool): Whether to save viualization results.
-            Default: True.
-        out_dir (str): The path to save visualization results.
-            Default: None.
-
-    Returns:
-        list[dict]: The prediction results.
-    """
-    yolo_model=YOLO('yolov8n-seg.pt')
-    yolo_model.to(device=model.device)
-
-    # yolo_model.eval()
-    model.eval()
-    results = []
-    dataset = data_loader.dataset
-    prog_bar = mmcv.ProgressBar(len(dataset))
-    debug = False
-    for i, data in enumerate(data_loader):
-
-        with torch.no_grad():
-            result = model(
-                return_loss=False, 
-                rescale=True, 
-                points=data['points'],
-                img=mask_imgs(yolo_model, data, camou_para, debug=debug),
-                camera_intrinsics=data['camera_intrinsics'],
-                camera2ego=data['camera2ego'],
-                lidar2ego=data['lidar2ego'],
-                lidar2camera=data['lidar2camera'],
-                camera2lidar=data['camera2lidar'],
-                lidar2img=data['lidar2img'],
-                img_aug_matrix=data['img_aug_matrix'],
-                lidar_aug_matrix=data['lidar_aug_matrix'],
-                img_metas=data['img_metas']
-            )
-
-        if show:
-            model.module.show_results(data, result, out_dir)
-
-        if len(result) > 1:
-            results.append(result)
-        else:
-            results.extend(result)
-
-        batch_size = len(result)
-        for _ in range(batch_size):
-            prog_bar.update()
-
-    return results
 
 def train_attack(
     model, 
@@ -425,26 +285,34 @@ def train_attack(
 
     for epoch in range(max_epochs):
         for data in tqdm(data_loaders, total=len(data_loaders)): 
+            imgs = data['img'].data[0]
+            camou_trans = tex_trans(camou_para1, size=img_size)
+            learned_camou = mask_imgs(yolo_model, imgs, camou_trans, allowed_words, debug=debug)[0]
             with torch.no_grad():
-                # imgs = data['img'][0].data[0]
-                # camou_trans = tex_trans(camou_para1, size=img_size)
                 loss = model(
                     # return_loss=False, 
+
                     rescale=True, 
-                    **data
-                    # points=data['points'],
-                    # img=mask_imgs(yolo_model, data, camou_para, debug=debug),
-                    # camera_intrinsics=data['camera_intrinsics'],
-                    # camera2ego=data['camera2ego'],
-                    # lidar2ego=data['lidar2ego'],
-                    # lidar2camera=data['lidar2camera'],
-                    # camera2lidar=data['camera2lidar'],
-                    # lidar2img=data['lidar2img'],
-                    # img_aug_matrix=data['img_aug_matrix'],
-                    # lidar_aug_matrix=data['lidar_aug_matrix'],
-                    # img_metas=data['img_metas']
+                    points=data['points'],
+                    img=learned_camou,
+                    gt_bboxes_3d=data['gt_bboxes_3d'],
+                    gt_labels_3d=data['gt_labels_3d'],
+                    camera_intrinsics=data['camera_intrinsics'],
+                    camera2ego=data['camera2ego'],
+                    lidar2ego=data['lidar2ego'],
+                    lidar2camera=data['lidar2camera'],
+                    camera2lidar=data['camera2lidar'],
+                    lidar2img=data['lidar2img'],
+                    img_aug_matrix=data['img_aug_matrix'],
+                    lidar_aug_matrix=data['lidar_aug_matrix'],
+                    img_metas=data['img_metas']
                 )
-                import pdb; pdb.set_trace()
+            total_loss = 1 - (loss['loss_heatmap'] + loss['layer_-1_loss_cls'] + loss['layer_-1_loss_bbox'] + loss['matched_ious'])
+            total_loss.backward()
+            optimizer.step()
+            camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+            # SAVE CAMOU HERE
+        # SAVE CAMOU AS IMAGE HERE
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
@@ -664,13 +532,6 @@ def main():
                 f'{cfg.data.imgs_per_gpu} in this experiments')
         cfg.data.samples_per_gpu = cfg.data.imgs_per_gpu
 
-    # data_loaders = build_dataloader(
-    #     datasets,
-    #     samples_per_gpu=1,
-    #     workers_per_gpu=cfg.data.workers_per_gpu,
-    #     dist=distributed,
-    #     shuffle=False
-    # )
     data_loaders = build_dataloader(
         datasets,
         cfg.data.samples_per_gpu,
@@ -708,139 +569,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-# def main():
-#     args = parse_args()
-
-#     assert args.out or args.eval or args.format_only or args.show \
-#         or args.show_dir, \
-#         ('Please specify at least one operation (save/eval/format/show the '
-#             'results / save the results) with the argument "--out", "--eval"'
-#             ', "--format-only", "--show" or "--show-dir"')
-
-#     if args.eval and args.format_only:
-#         raise ValueError('--eval and --format_only cannot be both specified')
-
-#     if args.out is not None and not args.out.endswith(('.pkl', '.pickle')):
-#         raise ValueError('The output file must be a pkl file.')
-
-#     cfg = Config.fromfile(args.config)
-#     if args.cfg_options is not None:
-#         cfg.merge_from_dict(args.cfg_options)
-#     # import modules from string list.
-#     if cfg.get('custom_imports', None):
-#         from mmcv.utils import import_modules_from_strings
-#         import_modules_from_strings(**cfg['custom_imports'])
-#     # set cudnn_benchmark
-#     if cfg.get('cudnn_benchmark', False):
-#         torch.backends.cudnn.benchmark = True
-
-#     cfg.model.pretrained = None
-#     cfg.data.test.update(dict(samples_per_gpu=args.bs))
-
-#     # in case the test dataset is concatenated
-#     samples_per_gpu = 1
-#     if isinstance(cfg.data.test, dict):
-#         cfg.data.test.test_mode = True
-#         samples_per_gpu = cfg.data.test.pop('samples_per_gpu', 1)
-#         if samples_per_gpu > 1:
-#             # Replace 'ImageToTensor' to 'DefaultFormatBundle'
-#             cfg.data.test.pipeline = replace_ImageToTensor(
-#                 cfg.data.test.pipeline)
-#     elif isinstance(cfg.data.test, list):
-#         for ds_cfg in cfg.data.test:
-#             ds_cfg.test_mode = True
-#         samples_per_gpu = max(
-#             [ds_cfg.pop('samples_per_gpu', 1) for ds_cfg in cfg.data.test])
-#         if samples_per_gpu > 1:
-#             for ds_cfg in cfg.data.test:
-#                 ds_cfg.pipeline = replace_ImageToTensor(ds_cfg.pipeline)
-
-#     # init distributed env first, since logger depends on the dist info.
-#     if args.launcher == 'none':
-#         distributed = False
-#         cfg.data.workers_per_gpu = 1
-#     else:
-#         distributed = True
-#         init_dist(args.launcher, **cfg.dist_params)
-
-#     # set random seeds
-#     if args.seed is not None:
-#         set_random_seed(args.seed, deterministic=args.deterministic)
-
-#     # build the dataloader
-#     # export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
-#     dataset = build_dataset(cfg.data.test)
-#     data_loader = build_dataloader(
-#         dataset,
-#         samples_per_gpu=samples_per_gpu,
-#         workers_per_gpu=cfg.data.workers_per_gpu,
-#         dist=distributed,
-#         shuffle=False)
-
-#     cfg.model.train_cfg = None
-#     model = build_model(cfg.model, test_cfg=cfg.get('test_cfg'))
-#     fp16_cfg = cfg.get('fp16', None)
-#     if fp16_cfg is not None:
-#         wrap_fp16_model(model)
-#     checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
-#     if args.fuse_conv_bn:
-#         model = fuse_conv_bn(model)
-#     # old versions did not save class info in checkpoints, this walkaround is
-#     # for backward compatibility
-#     if 'CLASSES' in checkpoint.get('meta', {}):
-#         model.CLASSES = checkpoint['meta']['CLASSES']
-#     else:
-#         model.CLASSES = dataset.CLASSES
-#     # palette for visualization in segmentation tasks
-#     if 'PALETTE' in checkpoint.get('meta', {}):
-#         model.PALETTE = checkpoint['meta']['PALETTE']
-#     elif hasattr(dataset, 'PALETTE'):
-#         # segmentation dataset has `PALETTE` attribute
-#         model.PALETTE = dataset.PALETTE
-
-
-#     if not distributed:
-#         model = MMDataParallel(model.cuda(), device_ids=[torch.cuda.current_device()])
-#         train_attack_single_gpu(model, data_loader)
-#     else:
-#         model = MMDistributedDataParallel(
-#             model.cuda(),
-#             device_ids=[torch.cuda.current_device()],
-#             broadcast_buffers=False)
-#         yolo_model=YOLO('yolov8n-seg.pt')
-#         outputs = train_attack_multi_gpu(
-#             model=model,
-#             yolo_model=yolo_model, 
-#             data_loader=data_loader, 
-#             tmpdir=args.tmpdir,
-#             gpu_collect=args.gpu_collect, 
-#             cfg=cfg
-#         )
-
-#     rank, _ = get_dist_info()
-#     if rank == 0:
-#         if args.out:
-#             print(f'\nwriting results to {args.out}')
-#             mmcv.dump(outputs, args.out)
-#             # outputs = mmcv.load(args.out)
-#         kwargs = {} if args.eval_options is None else args.eval_options
-#         if args.format_only:
-#             dataset.format_results(outputs, **kwargs)
-#         if args.eval:
-#             eval_kwargs = cfg.get('evaluation', {}).copy()
-#             # hard-code way to remove EvalHook args
-#             for key in [
-#                     'interval', 'tmpdir', 'start', 'gpu_collect', 'save_best',
-#                     'rule'
-#             ]:
-#                 eval_kwargs.pop(key, None)
-#             eval_kwargs.update(dict(metric=args.eval, **kwargs))
-#             if args.result_dir is not None:
-#                 eval_kwargs.update(pklfile_prefix=os.path.dirname(args.result_dir))
-#             print(dataset.evaluate(outputs, **eval_kwargs))
-
-
-# if __name__ == '__main__':
-#     main()

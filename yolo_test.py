@@ -158,7 +158,7 @@ def run_yolo11(model, tensor_list, width, height, search_labels= ['car', 'bicycl
 
     mask_list = [mask_tup[1] for entry in masks for mask_tup in entry]
     labels = [mask_tup[0] for entry in masks for mask_tup in entry]
-    vids = [mask_tup[2] for entry in masks for mask_tup in entry]
+    batch = [mask_tup[2] for entry in masks for mask_tup in entry]
     mask_entry = create_mask(mask_list, width, height)
 
     return mask_entry, labels, vids
@@ -176,14 +176,15 @@ def run_yolo8(model, tensor_list, width, height, search_labels= ['car', 'bicycle
     tensor_list = tensor_list.view(b*a, c, h, w)
     outputs = model(tensor_list, verbose=False)
 
-    masks = [[(int(class_idx), mask, video_id) for mask, class_idx in zip(out.masks.data, out.boxes.cls) if model.names[int(class_idx)] in search_labels] 
-             for video_id, out in enumerate(outputs) if len(out.boxes.cls) > 0]
+    masks = [[(int(class_idx), mask, idx//a, idx%a) for mask, class_idx in zip(out.masks.data, out.boxes.cls) if model.names[int(class_idx)] in search_labels] 
+             for idx, out in enumerate(outputs) if len(out.boxes.cls) > 0]
 
     labels =    [mask_tup[0] for entry in masks for mask_tup in entry]
     mask_list = [mask_tup[1] for entry in masks for mask_tup in entry]
-    vids =      [mask_tup[2] for entry in masks for mask_tup in entry]
+    batches =   [mask_tup[2] for entry in masks for mask_tup in entry]
+    angles =    [mask_tup[3] for entry in masks for mask_tup in entry]
 
-    return mask_list, labels, vids
+    return mask_list, labels, batches, angles
 
 def plot_masks(mask_entry, labels, vids, orig_images):
     cnt = 0
