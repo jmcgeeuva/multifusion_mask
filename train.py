@@ -284,6 +284,7 @@ def train_attack(
 
     h, w = int(H/resolution), int(W/resolution)
 
+    color_set = torch.tensor([[0,0,0],[255,255,255],[0,18,79],[5,80,214],[71,178,243],[178,159,211],[77,58,0],[211,191,167],[247,110,26],[110,76,16]]).to(model.device).float() / 255
     ##################################### SETUP Transpose #############################################
     expand_kernel = torch.nn.ConvTranspose2d(3, 3, resolution, stride=resolution, padding=0).to(model.device)
     expand_kernel.weight.data.fill_(0)
@@ -337,12 +338,14 @@ def train_attack(
             # losses = model(return_loss=True, **data)
             out = model.train_step(data, optimizer)
             loss_tensor = out['loss']
-            lambda_reduce = 1
-            lambda_smooth = .6
-            lambda_nps = .1
+            lambda_reduce = 2
+            lambda_smooth = .05
+            lambda_nps = .6
+            # Want to increase the error
             total_loss = lambda_reduce*(bias - (loss_tensor))
-            total_loss = total_loss + lambda_smooth*(loss_smooth(img))
-            total_loss = total_loss + lambda_nps*(loss_nps(camou_para, color_set) * 5)
+            # Smoothing of the camouflage
+            total_loss = total_loss + lambda_smooth*(loss_smooth(camou_para))
+            total_loss = total_loss + lambda_nps*(loss_nps(camou_para, color_set))
             total_loss.backward()
             running_loss += total_loss.item()
             optimizer.step()
