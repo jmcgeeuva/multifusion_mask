@@ -23,131 +23,10 @@ import time
 from copy import deepcopy
 from torch import optim
 import numpy as np
+from train import mask_imgs, tex_trans
 # export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
 
-def plot_bbox(image, bboxes, labels, print_labels=False, name='test.png'):
-   # Create a figure and axes  
-    fig, ax = plt.subplots()  
-      
-    # Display the image  
-    ax.imshow(image.permute(1, 2, 0))  
-      
-    # Plot each bounding box  
-    for bbox, label in zip(bboxes, labels):  
-        # Unpack the bounding box coordinates  
-        x1, y1, x2, y2 = bbox  
-        # Create a Rectangle patch  
-        rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')  
-        # Add the rectangle to the Axes  
-        ax.add_patch(rect)  
-        # Annotate the label  
-        if print_labels:
-            plt.text(x1, y1, label, color='white', fontsize=8, bbox=dict(facecolor='red', alpha=0.5))  
-      
-    # Remove the axis ticks and labels  
-    ax.axis('off')  
-      
-    # Show the plot  
-    plt.savefig(name)  
-
-def print_images(img, idx, norm=True, name='test.png'):
-    img = img[idx].permute(0, 2, 3, 1)
-    plt.figure()
-    fig, ax = plt.subplots(2, 3)
-
-    if norm:
-        img = (img - img.min()) / (img.max() - img.min())
-    
-
-    img1 = img[0, ...]
-    img2 = img[1, ...]
-    img3 = img[2, ...]
-    img4 = img[3, ...]
-    img5 = img[4, ...]
-    img6 = img[5, ...]
-
-    ax[0, 0].imshow(img1)
-    ax[0, 0].set_title(f"CAMERA_FRONT")
-    ax[0, 0].axis('off')
-    ax[0, 1].imshow(img2)
-    ax[0, 1].set_title(f"CAMERA_FRONT_RIGHT")
-    ax[0, 1].axis('off')
-    ax[0, 2].imshow(img3)
-    ax[0, 2].set_title(f"CAMERA_FRONT_LEFT")
-    ax[0, 2].axis('off')
-    ax[1, 0].imshow(img4)
-    ax[1, 0].set_title(f"CAMERA_BACK")
-    ax[1, 0].axis('off')
-    ax[1, 1].imshow(img5)
-    ax[1, 1].set_title(f"CAMERA_BACK_LEFT")
-    ax[1, 1].axis('off')
-    ax[1, 2].imshow(img6)
-    ax[1, 2].set_title(f"CAMERA_BACK_RIGHT")
-    ax[1, 2].axis('off')
-    plt.tight_layout()
-    plt.savefig(name)
-
-    return img1, img2, img3, img4, img5, img6
-
-def overlay_image(image, mask, texture, debug=False):
-    contour = torch.where((mask == 1), torch.zeros(1, device=mask.device), torch.ones(1, device=mask.device)).to(device=mask.device)
-    overlayed = torch.where((contour == 1.), image.to(device=contour.device), texture.to(device=contour.device)).to(device=mask.device)
-
-    return overlayed
-
-def bbox_xyxy_from_mask_torch(mask: torch.Tensor):
-    """
-    mask: (B, H, W) tensor of 0/1 or bool
-    returns: (B, 4) tensor of bounding boxes (x1, y1, x2, y2)
-             if a mask has no positive pixels, it will return (0, 0, 0, 0) for that batch
-    """
-    assert mask.ndim == 3, "mask should be (B, H, W)"
-    B, H, W = mask.shape
-    mask = mask.bool()
-
-    # Create coordinate grids
-    y_coords = torch.arange(H, device=mask.device).view(1, H, 1)
-    x_coords = torch.arange(W, device=mask.device).view(1, 1, W)
-
-    # Masked positions (set non-object to inf/-inf for reduction)
-    x_min = torch.where(mask, x_coords, torch.full_like(x_coords, W)).amin(dim=(1,2))
-    x_max = torch.where(mask, x_coords, torch.full_like(x_coords, -1)).amax(dim=(1,2))
-    y_min = torch.where(mask, y_coords, torch.full_like(y_coords, H)).amin(dim=(1,2))
-    y_max = torch.where(mask, y_coords, torch.full_like(y_coords, -1)).amax(dim=(1,2))
-
-    # Handle empty masks (where no 1s)
-    empty = (x_max < 0) | (y_max < 0)
-    x_min[empty] = 0
-    y_min[empty] = 0
-    x_max[empty] = 0
-    y_max[empty] = 0
-
-    # Stack into (B, 4)
-    boxes = torch.stack([x_min, y_min, x_max, y_max], dim=1)
-    return boxes
-    
-def tex_trans(camou, size=4096):
-    """
-    Flip, rotate, and crop the camouflage texture
-    """
-    camou_column = []
-    for i in range(6):
-        camou_row_list = []
-        for j in range(6):
-            camou1 = transforms.RandomHorizontalFlip(p=0.5)(camou.permute(0, 3, 1, 2)[0])
-            camou2 = transforms.RandomVerticalFlip(p=0.5)(camou1)
-            if np.random.rand(1)>0.5:
-                camou3 = transforms.functional.rotate(camou2, 90)
-            else:
-                camou3 = camou2
-            camou_row_list.append(camou3)
-        camou_row = torch.cat(tuple(camou_row_list), 1)
-        camou_column.append(camou_row)
-    camou_full = torch.cat(tuple(camou_column), 2).unsqueeze(0)
-    camou_crop = transforms.RandomCrop(size)(camou_full).permute(0, 2, 3, 1)
-    return camou_crop
-
-def train_attack_multi_gpu(model, yolo_model, data_loader, allowed_words= ['car', 'bicycle', 'person'], cfg=None, img_size=(384, 1056), H=1056, W=1056, resolution=8, tmpdir=None, gpu_collect=False):
+def test_attack(model, yolo_model, data_loader, camou_para1, no_attack=False, allowed_words= ['car', 'bicycle', 'person'], cfg=None, img_size=(384, 1056), H=1056, W=1056, resolution=8, tmpdir=None, gpu_collect=False):
     """Test model with multiple gpus.
 
     This method tests model with multiple gpus and collects the results
@@ -166,28 +45,6 @@ def train_attack_multi_gpu(model, yolo_model, data_loader, allowed_words= ['car'
     Returns:
         list: The prediction results.
     """
-    
-    h, w = int(H/resolution), int(W/resolution)
-
-    ##################################### SETUP Transpose #############################################
-    expand_kernel = torch.nn.ConvTranspose2d(3, 3, resolution, stride=resolution, padding=0).to(model.device)
-    expand_kernel.weight.data.fill_(0)
-    expand_kernel.bias.data.fill_(0)
-    for i in range(3):
-        expand_kernel.weight[i, i, :, :].data.fill_(1)
-    ###################################################################################################
-
-    #####################################################################################
-    # continuous color
-    camou_para = torch.rand([1, h, w, 3]).float().to(model.device)
-    camou_para.requires_grad_(True)
-    begin_para = deepcopy(camou_para)
-    optimizer = optim.Adam([camou_para], lr=0.01)
-    camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
-    #####################################################################################
-
-
-
     model.eval()
     results = []
     dataset = data_loader.dataset
@@ -199,22 +56,15 @@ def train_attack_multi_gpu(model, yolo_model, data_loader, allowed_words= ['car'
 
     for i, data in enumerate(data_loader):
         with torch.no_grad():
-            imgs = data['img'][0].data[0]
-            camou_trans = tex_trans(camou_para1, size=img_size)
+            if not no_attack:
+                imgs = data['img'][0].data[0]
+                camou_trans = tex_trans(camou_para1, size=img_size)
+                learned_img = mask_imgs(yolo_model, imgs, camou_trans, allowed_words, debug=debug)
+                data['img'] = learned_img
             result = model(
                 return_loss=False,  # FIXME turn this to true and the whole thing explodes
                 rescale=True, 
-                points=data['points'],
-                img=mask_imgs(yolo_model, imgs, camou_trans, allowed_words, debug=debug),
-                camera_intrinsics=data['camera_intrinsics'],
-                camera2ego=data['camera2ego'],
-                lidar2ego=data['lidar2ego'],
-                lidar2camera=data['lidar2camera'],
-                camera2lidar=data['camera2lidar'],
-                lidar2img=data['lidar2img'],
-                img_aug_matrix=data['img_aug_matrix'],
-                lidar_aug_matrix=data['lidar_aug_matrix'],
-                img_metas=data['img_metas']
+                **data
             )
             # result = model(return_loss=False, rescale=True, **data)
             # encode mask results
@@ -236,144 +86,81 @@ def train_attack_multi_gpu(model, yolo_model, data_loader, allowed_words= ['car'
         results = collect_results_cpu(results, len(dataset), tmpdir)
     return results
 
-            
-def mask_imgs(yolo_model, imgs, camou_para, allowed_words, ratio_check=2e-3, debug=False):
-    
-    if debug:
-        print_images(imgs, 0, norm=False, name='dark.png')
-        print_images(imgs, 0, norm=True, name='norm.png')
-    
-    range_num = imgs.max() - imgs.min()
-    min_num = imgs.min()
-    imgs_norm = (imgs - min_num) / (range_num)
-    # imgs = torch.nn.functional(img, size=())
-    mask_entry, labels, vids = run_yolo8(
-            yolo_model, 
-            imgs_norm, 
-            imgs_norm.shape[-2], 
-            imgs_norm.shape[-1],
-            search_labels=allowed_words
-    )
-    
-    imgs_processed = imgs
-    if len(mask_entry) > 0:
-        masks = torch.stack(mask_entry)
-        
-        bboxes = bbox_xyxy_from_mask_torch(masks)
-        areas = (bboxes[:, 2] - bboxes[:, 0])*(bboxes[:, 3] - bboxes[:, 1])
-        total_area = imgs.shape[-2]*imgs.shape[-1]
-        ratio = areas/total_area
-        ratio_indices = (ratio > ratio_check).nonzero(as_tuple=True)[0]
-        if ratio_indices.numel() != 0:
-            if debug:
-                plot_masks(masks, labels, vids, imgs[0])
-            
-            
-            H, W = imgs_norm[0].shape[-2], imgs_norm[0].shape[-1]  # example shape
-            # green = torch.zeros(3, H, W)
-            # green[1, :, :] = 1.0  # set G channel to 1
-            # lily_img = Image.open('./Lily.jpg').resize((imgs_norm[0].shape[-1], imgs_norm[0].shape[-2]))
-            # lily_img = transforms.ToTensor()(lily_img)
-            imgs_overlayed = overlay_image(imgs_norm[0][vids], masks.unsqueeze(1).repeat(1, 3, 1, 1), camou_para.permute(0, 3, 1, 2))
+# def train_attack_single_gpu(model,
+#                     data_loader,
+#                     show=False,
+#                     out_dir=None,
+#                     show_score_thr=0.3,
+#                     ratio_check=2e-3):
+#     """Test model with single gpu.
 
-            # unnormalize
-            imgs_processed = (imgs_overlayed * range_num) + min_num
-            imgs_processed = imgs_processed[ratio_indices].to(device=imgs.device)
-            bboxes = bboxes[ratio_indices]
+#     This method tests model with single gpu and gives the 'show' option.
+#     By setting ``show=True``, it saves the visualization results under
+#     ``out_dir``.
 
-            prob = ratio[ratio_indices] / ratio[ratio_indices].sum()
-            # Have to switch to cpu because it does not handle small tensors well
-            r_idx = torch.multinomial(prob.cpu(), 1, replacement=True).to(prob.device)
-            choice = ratio_indices[r_idx]
-            imgs[:, vids[choice], :, :, :] = imgs_processed[r_idx]
+#     Args:
+#         model (nn.Module): Model to be tested.
+#         data_loader (nn.Dataloader): Pytorch data loader.
+#         show (bool): Whether to save viualization results.
+#             Default: True.
+#         out_dir (str): The path to save visualization results.
+#             Default: None.
 
-        if debug:
-            print_images(imgs, 0, norm=True, name='masked.png')
-            labels = [yolo_model.names[label] for i, label in enumerate(labels) if i in ratio_indices]
-            vids = [label for i, label in enumerate(vids) if i in ratio_indices]
-            plot_bbox(imgs_norm[0][vids][0], [bboxes[0]], [labels[0]])
-            plt.figure()
-            plt.subplot(1, 2, 1)
-            plt.imshow(imgs_processed[0].permute(1,2, 0).cpu().detach().numpy())
-            plt.title('car')
-            plt.axis('off')
-            plt.subplot(1, 2, 2)
-            plt.imshow(masks[0].cpu().detach().numpy())
-            plt.title(f'mask')
-            plt.axis('off')
-            plt.savefig('overlay.png')
-    return [DC([imgs], stack=False, cpu_only=False)]
+#     Returns:
+#         list[dict]: The prediction results.
+#     """
+#     yolo_model=YOLO('yolov8n-seg.pt')
+#     yolo_model.to(device=model.device)
 
-def train_attack_single_gpu(model,
-                    data_loader,
-                    show=False,
-                    out_dir=None,
-                    show_score_thr=0.3,
-                    ratio_check=2e-3):
-    """Test model with single gpu.
+#     # yolo_model.eval()
+#     model.eval()
+#     results = []
+#     dataset = data_loader.dataset
+#     prog_bar = mmcv.ProgressBar(len(dataset))
+#     debug = False
+#     for i, data in enumerate(data_loader):
 
-    This method tests model with single gpu and gives the 'show' option.
-    By setting ``show=True``, it saves the visualization results under
-    ``out_dir``.
+#         with torch.no_grad():
+#             result = model(
+#                 return_loss=False, 
+#                 rescale=True, 
+#                 points=data['points'],
+#                 img=mask_imgs(yolo_model, data, camou_para, debug=debug),
+#                 camera_intrinsics=data['camera_intrinsics'],
+#                 camera2ego=data['camera2ego'],
+#                 lidar2ego=data['lidar2ego'],
+#                 lidar2camera=data['lidar2camera'],
+#                 camera2lidar=data['camera2lidar'],
+#                 lidar2img=data['lidar2img'],
+#                 img_aug_matrix=data['img_aug_matrix'],
+#                 lidar_aug_matrix=data['lidar_aug_matrix'],
+#                 img_metas=data['img_metas']
+#             )
 
-    Args:
-        model (nn.Module): Model to be tested.
-        data_loader (nn.Dataloader): Pytorch data loader.
-        show (bool): Whether to save viualization results.
-            Default: True.
-        out_dir (str): The path to save visualization results.
-            Default: None.
+#         if show:
+#             model.module.show_results(data, result, out_dir)
 
-    Returns:
-        list[dict]: The prediction results.
-    """
-    yolo_model=YOLO('yolov8n-seg.pt')
-    yolo_model.to(device=model.device)
+#         if len(result) > 1:
+#             results.append(result)
+#         else:
+#             results.extend(result)
 
-    # yolo_model.eval()
-    model.eval()
-    results = []
-    dataset = data_loader.dataset
-    prog_bar = mmcv.ProgressBar(len(dataset))
-    debug = False
-    for i, data in enumerate(data_loader):
+#         batch_size = len(result)
+#         for _ in range(batch_size):
+#             prog_bar.update()
 
-        with torch.no_grad():
-            result = model(
-                return_loss=False, 
-                rescale=True, 
-                points=data['points'],
-                img=mask_imgs(yolo_model, data, camou_para, debug=debug),
-                camera_intrinsics=data['camera_intrinsics'],
-                camera2ego=data['camera2ego'],
-                lidar2ego=data['lidar2ego'],
-                lidar2camera=data['lidar2camera'],
-                camera2lidar=data['camera2lidar'],
-                lidar2img=data['lidar2img'],
-                img_aug_matrix=data['img_aug_matrix'],
-                lidar_aug_matrix=data['lidar_aug_matrix'],
-                img_metas=data['img_metas']
-            )
-
-        if show:
-            model.module.show_results(data, result, out_dir)
-
-        if len(result) > 1:
-            results.append(result)
-        else:
-            results.extend(result)
-
-        batch_size = len(result)
-        for _ in range(batch_size):
-            prog_bar.update()
-
-    return results
+#     return results
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description='MMDet test (and eval) a model')
     parser.add_argument('config', help='test config file path')
     parser.add_argument('checkpoint', help='checkpoint file')
+    parser.add_argument('--camou', help='')
+    parser.add_argument(
+        '--no-attack',
+        action='store_true',
+        help='')
     parser.add_argument('--out', help='output result file in pickle format')
     parser.add_argument(
         '--fuse-conv-bn',
@@ -561,18 +348,47 @@ def main():
 
 
     if not distributed:
-        model = MMDataParallel(model.cuda(), device_ids=[torch.cuda.current_device()])
-        train_attack_single_gpu(model, data_loader)
+        # model = MMDataParallel(model.cuda(), device_ids=[torch.cuda.current_device()])
+        # train_attack_single_gpu(model, data_loader)
+        raise ValueError('Error: Single GPU not implemented')
     else:
         model = MMDistributedDataParallel(
             model.cuda(),
             device_ids=[torch.cuda.current_device()],
             broadcast_buffers=False)
         yolo_model=YOLO('yolov8n-seg.pt')
-        outputs = train_attack_multi_gpu(
+            
+        H=1056
+        W=1056
+        resolution=8
+        h, w = int(H/resolution), int(W/resolution)
+
+        ##################################### SETUP Transpose #############################################
+        expand_kernel = torch.nn.ConvTranspose2d(3, 3, resolution, stride=resolution, padding=0).to(model.device)
+        expand_kernel.weight.data.fill_(0)
+        expand_kernel.bias.data.fill_(0)
+        for i in range(3):
+            expand_kernel.weight[i, i, :, :].data.fill_(1)
+        ###################################################################################################
+
+        #####################################################################################
+        # continuous color
+
+        camou_path = args.camou
+        arr = np.load(camou_path)   # e.g., shape (H, W, 3) or any dimensions
+        # Convert to torch tensor
+        camou_para = torch.from_numpy(arr).float().to(model.device)
+
+        camou_para = torch.rand([1, h, w, 3]).float().to(model.device)
+        camou_para.requires_grad_(True)
+        camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+        #####################################################################################
+        outputs = test_attack(
             model=model,
+            no_attack=args.no_attack,
             yolo_model=yolo_model, 
             data_loader=data_loader,
+            camou_para1=camou_para1,
             allowed_words=allowed_words, 
             tmpdir=args.tmpdir,
             gpu_collect=args.gpu_collect, 
