@@ -163,7 +163,7 @@ def run_yolo11(model, tensor_list, width, height, search_labels= ['car', 'bicycl
 
     return mask_entry, labels, vids
     
-def run_yolo8(model, tensor_list, width, height, search_labels= ['car', 'bicycle', 'fire hydrant', 'stop sign', 'parking meter', 'person']):
+def run_yolo8(model, tensor_list, width, height, device, search_labels= ['car', 'bicycle', 'fire hydrant', 'stop sign', 'parking meter', 'person']):
     """
     Given a tensor of BxAxCxHxW (batch x angle x channel x height x width) this function will run YOLO and find the segmentations for any of the search labels listed (as seen in model.names)
     these will then be output as a tensor of masks, the coinciding labels, and the number of the video that goes along with that output

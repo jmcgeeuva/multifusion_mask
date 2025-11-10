@@ -164,7 +164,7 @@ def tex_trans(camou, size=4096):
     camou_crop = transforms.RandomCrop(size)(camou_full).permute(0, 2, 3, 1)
     return camou_crop
             
-def mask_imgs(yolo_model, imgs, camou_para, allowed_words, num_samples = 1, ratio_check=2e-3, debug=False):
+def mask_imgs(yolo_model, imgs, camou_para, allowed_words, device, num_samples = 1, ratio_check=2e-3, debug=False):
     
     if debug:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -178,18 +178,22 @@ def mask_imgs(yolo_model, imgs, camou_para, allowed_words, num_samples = 1, rati
     min_num = imgs.min()
     # B x 6 x 3 x H x W
     imgs_norm = (imgs - min_num) / (range_num)
+    H, W = imgs_norm.shape[-2], imgs_norm.shape[-1]  # example shape
     # imgs = torch.nn.functional(img, size=())
-    mask_entry, labels, batches, angles = run_yolo8(
+    masks, labels, batches, angles = run_yolo8(
             yolo_model, 
             imgs_norm, 
             imgs_norm.shape[-2], 
             imgs_norm.shape[-1],
+            device, 
             search_labels=allowed_words
     )
     
     imgs_processed = imgs
-    if len(mask_entry) > 0:
-        masks = torch.stack(mask_entry)
+    if len(masks) > 0:
+        masks = torch.stack(masks).to(device=device)
+        batches = torch.tensor(batches, device=device)
+        angles = torch.tensor(angles, device=device)
         
         bboxes = bbox_xyxy_from_mask_torch(masks)
         areas = (bboxes[:, 2] - bboxes[:, 0])*(bboxes[:, 3] - bboxes[:, 1])
@@ -200,35 +204,46 @@ def mask_imgs(yolo_model, imgs, camou_para, allowed_words, num_samples = 1, rati
             if debug:
                 plot_masks(masks, labels, batches, angles, imgs, name=directory_name+'/test{}.png')
             
-            
-            H, W = imgs_norm.shape[-2], imgs_norm.shape[-1]  # example shape
-            # green = torch.zeros(3, H, W)
-            # green[1, :, :] = 1.0  # set G channel to 1
-            # lily_img = Image.open('./Lily.jpg').resize((imgs_norm[0].shape[-1], imgs_norm[0].shape[-2]))
-            # lily_img = transforms.ToTensor()(lily_img)
-            imgs_overlayed = overlay_image(imgs_norm[batches, angles, :, :], masks.unsqueeze(1).repeat(1, 3, 1, 1), camou_para.permute(0, 3, 1, 2))
-
             # unnormalize
-            imgs_processed = (imgs_overlayed * range_num) + min_num
+            imgs_overlayed = overlay_image(imgs_norm[batches, angles, :, :], masks.unsqueeze(1).repeat(1, 3, 1, 1), camou_para.permute(0, 3, 1, 2))
+            imgs_unnorm = (imgs_overlayed * range_num) + min_num
+            imgs_unnorm.to(device=device)
 
 
             # Have to switch to cpu because it does not handle small tensors well 
             for i in range(imgs.shape[0]):
-                t = torch.nonzero(torch.tensor(batches) == i).flatten()
-
-                tmp_angles = torch.tensor(angles)[t]
+                t = torch.nonzero(batches == i).flatten()
                 
+                # Filter out the small targets in the batch
                 ratio_indices = (ratio[t] > ratio_check).nonzero(as_tuple=True)[0]
-                prob = (ratio[ratio_indices] / ratio[ratio_indices].sum())
+                t_filtered = t[ratio_indices].flatten()
+                filtered_ratio = ratio[t_filtered]
+                prob = (filtered_ratio / filtered_ratio.sum())
                 # FIXME when prob is empty the sum of the probability is 0 and this throws an error
                 if len(prob) == 0:
                     continue
                 
-                r_idx = torch.multinomial(prob.cpu(), num_samples, replacement=True).to(prob.device)
+                # Sample from the distribution of target sizes num_samples amount of examples
+                r_idx = torch.multinomial(prob.cpu(), num_samples, replacement=True).to(device)
 
-                imgs_tmp = imgs_processed[t][ratio_indices].to(device=imgs.device)
-                choice = ratio_indices[r_idx]
-                imgs[i, tmp_angles[choice], :, :, :] = imgs_tmp[r_idx, :, :, :]
+                choice = t_filtered[r_idx].to(device=device)
+                
+                assert masks.device == imgs.device, f"devices of mask and model do not match {masks.device} != {imgs.device}"
+                assert angles.device == imgs.device, f"devices of angles and model do not match {angles.device} != {imgs.device}"
+                assert imgs_unnorm.device == imgs.device, f"devices of imgs_unnorm and model do not match {imgs_unnorm.device} != {imgs.device}"
+                masks_chosen = masks[choice]
+                angles_chosen = angles[choice]
+                imgs_chosen = imgs_unnorm[choice]
+            
+                # sum the masks from the same classes so that there are multiple images in one mask
+                # unique_angles, inverse_indices = torch.unique(angles_chosen, return_inverse=True)
+                # num_unique = unique_angles.numel()
+                # summed_masks = torch.zeros(num_unique, *masks_chosen.shape[1:], device=masks_chosen.device, dtype=masks_chosen.dtype)
+                # summed_masks.scatter_add_(0, inverse_indices.view(-1, 1, 1).expand_as(masks_chosen), masks_chosen)
+                
+                imgs_overlayed = overlay_image(imgs_norm[i, angles_chosen, :, :], masks_chosen.unsqueeze(1).repeat(1, 3, 1, 1), camou_para.permute(0, 3, 1, 2))
+                imgs_chosen = (imgs_overlayed * range_num) + min_num
+                imgs_processed[i, angles_chosen, :, :, :] = imgs_chosen.to(device=device)
         if debug:
             print_images(imgs.detach(), 0, norm=True, name=f'{directory_name}/masked.png')
             labels = [yolo_model.names[label] for i, label in enumerate(labels) if i in ratio_indices]
@@ -246,7 +261,8 @@ def mask_imgs(yolo_model, imgs, camou_para, allowed_words, num_samples = 1, rati
             plt.title(f'mask')
             plt.axis('off')
             plt.savefig(f'{directory_name}/overlay.png')
-    return [DC([imgs], stack=False, cpu_only=False)]
+    
+    return [DC([imgs_processed], stack=False, cpu_only=False)]
 
 def loss_smooth(img):
     b, c, w, h = img.shape
@@ -325,24 +341,27 @@ def train_attack(
     for epoch in range(max_epochs):
         model.train()
         running_loss = 0
-        for data in tqdm(data_loaders, total=len(data_loaders)): 
+        for data in data_loaders: 
             optimizer.zero_grad(set_to_none=True)
             
             imgs = data['img'].data[0]
+            # imgs = imgs.to(device=model.device)
             camou_trans = tex_trans(camou_para1, size=img_size)
-            learned_camou = mask_imgs(yolo_model, imgs, camou_trans, allowed_words, num_samples=num_samples, debug=debug)[0]
+            learned_camou = mask_imgs(yolo_model, imgs, camou_trans, allowed_words, device=imgs.device, num_samples=num_samples, debug=debug)[0]
             assert learned_camou.data[0].requires_grad, "Learned_camou does not require gradient"
+            # learned_camou.data[0] = learned_camou.data[0].cpu()
             
             data['img'] = learned_camou
             
             # losses = model(return_loss=True, **data)
             out = model.train_step(data, optimizer)
+            # import pdb; pdb.set_trace()
             loss_tensor = out['loss']
-            lambda_reduce = 2
+            lambda_reduce = 1
             lambda_smooth = .05
-            lambda_nps = .6
+            lambda_nps = .05
             # Want to increase the error
-            total_loss = lambda_reduce*(bias - (loss_tensor))
+            total_loss = lambda_reduce*(5 - (loss_tensor))
             # Smoothing of the camouflage
             total_loss = total_loss + lambda_smooth*(loss_smooth(camou_para))
             total_loss = total_loss + lambda_nps*(loss_nps(camou_para, color_set))
