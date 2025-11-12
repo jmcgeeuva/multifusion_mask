@@ -1,6 +1,16 @@
 import cv2
 import pandas as pdb
-from ultralytics import YOLO
+# FIXME ME find a better way to address the ultralytics problem
+cnt = 0
+while cnt < 5:
+    try:
+        from ultralytics import YOLO
+        cnt = 100
+    except:
+        cnt += 1
+        pass
+if cnt > 5 and cnt != 100:
+    raise ValueError("Unable to load ultralytics try again")
 from PIL import Image, ImageDraw, ImageFont
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
