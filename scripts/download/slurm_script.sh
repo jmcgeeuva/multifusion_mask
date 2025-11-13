@@ -47,7 +47,7 @@ SUFFIX="_blobs.tgz"
 FILE="${PREFIX}${i}${SUFFIX}"
 
 echo "Downloading $FILE" >> "${logfile}" 2>&1
-sh download_train.sh ./data/nuscenes/train ${SLURM_ARRAY_TASK_ID} >> "${logfile}" 2>&1
+sh ./scripts/download/download_train.sh ./data/nuscenes/train ${SLURM_ARRAY_TASK_ID} >> "${logfile}" 2>&1
 cd ./data/nuscenes/train
 echo "Untar $FILE" >> "../${logfile}" 2>&1
 tar -xvf $FILE >> "../${logfile}" 2>&1
