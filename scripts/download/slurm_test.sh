@@ -43,8 +43,8 @@ pwd
 FILE="v1.0-test_blobs.tgz"
 
 echo "Downloading $FILE" >> "${logfile}" 2>&1
-sh download_test.sh ./nuscenes_test ${SLURM_ARRAY_TASK_ID} >> "${logfile}" 2>&1
-cd ./nuscenes_test 
+sh ./scripts/download/download_test.sh ./data/nuscenes/test ${SLURM_ARRAY_TASK_ID} >> "${logfile}" 2>&1
+cd ./data/nuscenes/test 
 echo "Untar $FILE" >> "../${logfile}" 2>&1
 tar -xvf $FILE >> "../${logfile}" 2>&1
 
