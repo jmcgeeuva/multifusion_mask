@@ -40,74 +40,11 @@ from copy import deepcopy
 from torch import optim
 import numpy as np
 from datetime import datetime
-from test import mask_imgs, tex_trans, test_attack, load_camou
+from test import mask_imgs, test_attack, load_camou
+from augmentation import get_augmentation
 
 from torch.utils.data import Subset
 # export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
-
-def plot_bbox(image, bboxes, labels, print_labels=False, name='test.png'):
-   # Create a figure and axes  
-    fig, ax = plt.subplots()  
-      
-    # Display the image  
-    ax.imshow(image.permute(1, 2, 0))  
-      
-    # Plot each bounding box  
-    for bbox, label in zip(bboxes, labels):  
-        # Unpack the bounding box coordinates  
-        x1, y1, x2, y2 = bbox  
-        # Create a Rectangle patch  
-        rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')  
-        # Add the rectangle to the Axes  
-        ax.add_patch(rect)  
-        # Annotate the label  
-        if print_labels:
-            plt.text(x1, y1, label, color='white', fontsize=8, bbox=dict(facecolor='red', alpha=0.5))  
-      
-    # Remove the axis ticks and labels  
-    ax.axis('off')  
-      
-    # Show the plot  
-    plt.savefig(name)  
-
-def print_images(img, idx, norm=True, name='test.png'):
-    img = img[idx].permute(0, 2, 3, 1)
-    plt.figure()
-    fig, ax = plt.subplots(2, 3)
-
-    if norm:
-        img = (img - img.min()) / (img.max() - img.min())
-    
-
-    img1 = img[0, ...]
-    img2 = img[1, ...]
-    img3 = img[2, ...]
-    img4 = img[3, ...]
-    img5 = img[4, ...]
-    img6 = img[5, ...]
-
-    ax[0, 0].imshow(img1)
-    ax[0, 0].set_title(f"CAMERA_FRONT")
-    ax[0, 0].axis('off')
-    ax[0, 1].imshow(img2)
-    ax[0, 1].set_title(f"CAMERA_FRONT_RIGHT")
-    ax[0, 1].axis('off')
-    ax[0, 2].imshow(img3)
-    ax[0, 2].set_title(f"CAMERA_FRONT_LEFT")
-    ax[0, 2].axis('off')
-    ax[1, 0].imshow(img4)
-    ax[1, 0].set_title(f"CAMERA_BACK")
-    ax[1, 0].axis('off')
-    ax[1, 1].imshow(img5)
-    ax[1, 1].set_title(f"CAMERA_BACK_LEFT")
-    ax[1, 1].axis('off')
-    ax[1, 2].imshow(img6)
-    ax[1, 2].set_title(f"CAMERA_BACK_RIGHT")
-    ax[1, 2].axis('off')
-    plt.tight_layout()
-    plt.savefig(name)
-
-    return img1, img2, img3, img4, img5, img6
     
 def loss_smooth(img):
     b, c, w, h = img.shape
@@ -144,6 +81,7 @@ def train_attack(
     val_loader,
     rank,
     world_size,
+    device='cpu',
     timestamp=None,
     work_dir=None,
     num_samples=1,
@@ -159,9 +97,9 @@ def train_attack(
 
     h, w = int(H/resolution), int(W/resolution)
 
-    color_set = torch.tensor(cfg.color_map).to(model.device).float() / 255
+    color_set = torch.tensor(cfg.color_map).to(device).float() / 255
     ##################################### SETUP Transpose #############################################
-    expand_kernel = torch.nn.ConvTranspose2d(3, 3, resolution, stride=resolution, padding=0).to(model.device)
+    expand_kernel = torch.nn.ConvTranspose2d(3, 3, resolution, stride=resolution, padding=0).to(device)
     expand_kernel.weight.data.fill_(0)
     expand_kernel.bias.data.fill_(0)
     for i in range(3):
@@ -174,13 +112,14 @@ def train_attack(
     #####################################################################################
     # continuous color
     if cfg.camou_path is not None:
-        camou_para, camou_para1 = load_camou(cfg.camou_path, device=model.device)
+        camou_para, camou_para1 = load_camou(cfg.camou_path, expand_kernel, device=device)
     else:
-        camou_para = torch.rand([1, h, w, 3]).float().to(model.device)
+        camou_para = torch.rand([1, h, w, 3]).float().to(device)
         camou_para.requires_grad_(True)
         begin_para = deepcopy(camou_para)
         camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
-        optimizer = optim.Adam([camou_para], lr=cfg.lr)
+    
+    optimizer = optim.Adam([camou_para], lr=cfg.lr)
     
     # if work_dir is None:
     #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -199,6 +138,7 @@ def train_attack(
             no_attack=True,
             yolo_model=yolo_model, 
             data_loader=val_loader,
+            tex_trans=tex_trans,
             camou_para1=None,
             allowed_words=allowed_words, 
             tmpdir=tmpdir,
@@ -218,10 +158,15 @@ def train_attack(
             print(f"failed to print or save {work_dir}")
     #####################################################################################
     
+    tex_trans = get_augmentation(img_size)
+
     # model.eval()
     time.sleep(2)  # This line can prevent deadlock problem in some cases.
 
-    model.module.detach = False
+    if device == 'cpu':
+        model.detach = False
+    else:
+        model.module.detach = False
     for epoch in range(max_epochs):
         model.train()
         running_loss = 0
@@ -234,8 +179,8 @@ def train_attack(
             
             imgs = data['img'].data[0]
             batch_size = imgs.shape[0]
-            # imgs = imgs.to(device=model.device)
-            camou_trans = tex_trans(camou_para1, size=img_size)
+            # imgs = imgs.to(device=device)
+            camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
             learned_camou = mask_imgs(yolo_model, imgs, camou_trans, allowed_words, device=imgs.device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=num_samples, debug=cfg.debug)[0]
             # assert learned_camou.data[0].requires_grad, "Learned_camou does not require gradient"
             # learned_camou.data[0] = learned_camou.data[0].cpu()
@@ -280,6 +225,7 @@ def train_attack(
                     model=model,
                     no_attack=False,
                     yolo_model=yolo_model, 
+                    tex_trans=tex_trans,
                     data_loader=val_loader,
                     camou_para1=camou_para1,
                     allowed_words=allowed_words, 
@@ -304,8 +250,8 @@ def parse_args():
         action='store_true',
         help='Whether to fuse conv and bn, this will slightly increase'
         'the inference speed')
-    parser.add_argument(
-        '--allowed-words', type=str, default='./allowed_words.txt', help='')
+    # parser.add_argument(
+    #     '--allowed-words', type=str, default='./allowed_words.txt', help='')
     parser.add_argument(
         '--resume-from', help='the checkpoint file to resume from')
     parser.add_argument(
@@ -324,7 +270,7 @@ def parse_args():
         nargs='+',
         help='ids of gpus to use '
         '(only applicable to non-distributed training)')
-    parser.add_argument('--seed', type=int, default=0, help='random seed')
+    parser.add_argument('--seed', type=int, default=None, help='random seed')
     parser.add_argument(
         '--deterministic',
         action='store_true',
@@ -370,18 +316,29 @@ def parse_args():
 
     return args
 
+def load_gpu(cfg, logger):
+    if 'imgs_per_gpu' in cfg.data:
+        logger.warning('"imgs_per_gpu" is deprecated in MMDet V2.0. '
+                    'Please use "samples_per_gpu" instead')
+        if 'samples_per_gpu' in cfg.data:
+            logger.warning(
+                f'Got "imgs_per_gpu"={cfg.data.imgs_per_gpu} and '
+                f'"samples_per_gpu"={cfg.data.samples_per_gpu}, "imgs_per_gpu"'
+                f'={cfg.data.imgs_per_gpu} is used in this experiments')
+        else:
+            logger.warning(
+                'Automatically set "samples_per_gpu"="imgs_per_gpu"='
+                f'{cfg.data.imgs_per_gpu} in this experiments')
+        cfg.data.samples_per_gpu = cfg.data.imgs_per_gpu
 
-def main():
-    args = parse_args()
-
-    cfg = Config.fromfile(args.config)
+def setup(args, cfg):
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
     # import modules from string list.
     if cfg.get('custom_imports', None):
         from mmcv.utils import import_modules_from_strings
         import_modules_from_strings(**cfg['custom_imports'])
-
+    
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
@@ -394,31 +351,10 @@ def main():
         # use config filename as default work_dir if cfg.work_dir is None
         cfg.work_dir = osp.join('./work_dirs',
                                 osp.splitext(osp.basename(args.config))[0])
-
+    
     if args.extra_tag is not None:
         cfg.work_dir = osp.join(cfg.work_dir, args.extra_tag)
-
-    if args.resume_from is not None:
-        cfg.resume_from = args.resume_from
-    if args.gpu_ids is not None:
-        cfg.gpu_ids = args.gpu_ids
-    else:
-        cfg.gpu_ids = range(1) if args.gpus is None else range(args.gpus)
-
-    if args.autoscale_lr:
-        # apply the linear scaling rule (https://arxiv.org/abs/1706.02677)
-        cfg.optimizer['lr'] = cfg.optimizer['lr'] * len(cfg.gpu_ids) / 8
-
-    # init distributed env first, since logger depends on the dist info.
-    if args.launcher == 'none':
-        distributed = False
-    else:
-        distributed = True
-        init_dist(args.launcher, **cfg.dist_params)
-        # re-set gpu_ids with distributed training mode
-        _, world_size = get_dist_info()
-        cfg.gpu_ids = range(world_size)
-
+    
     # create work_dir
     mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
     # dump config
@@ -435,32 +371,45 @@ def main():
         logger_name = 'mmdet'
     logger = get_root_logger(
         log_file=log_file, log_level=cfg.log_level, name=logger_name)
+    
+    if args.gpu_ids is not None:
+        cfg.gpu_ids = args.gpu_ids
+    else:
+        cfg.gpu_ids = range(1) if args.gpus is None else range(args.gpus)
 
-    # init the meta dict to record some important information such as
-    # environment info and seed, which will be logged
-    meta = dict()
-    # log env info
-    env_info_dict = collect_env()
-    env_info = '\n'.join([(f'{k}: {v}') for k, v in env_info_dict.items()])
-    dash_line = '-' * 60 + '\n'
-    logger.info('Environment info:\n' + dash_line + env_info + '\n' +
-                dash_line)
-    meta['env_info'] = env_info
-    meta['config'] = cfg.pretty_text
-
-    # log some basic info
-    logger.info(f'Distributed training: {distributed}')
-    logger.info(f'Config:\n{cfg.pretty_text}')
-
+    # init distributed env first, since logger depends on the dist info.
+    if args.launcher == 'none':
+        cfg.distributed = False
+    else:
+        cfg.distributed = True
+        init_dist(args.launcher, **cfg.dist_params)
+        # re-set gpu_ids with distributed training mode
+        _, world_size = get_dist_info()
+        cfg.gpu_ids = range(world_size)
+    
     # set random seeds
     if args.seed is not None:
         logger.info(f'Set random seed to {args.seed}, '
                     f'deterministic: {args.deterministic}')
         set_random_seed(args.seed, deterministic=args.deterministic)
+    else:
+        import random
+        args.seed = int(random.random()*10e7)
+        logger.info(f'Set random seed to {args.seed}, '
+                    f'deterministic: {args.deterministic}')
+        set_random_seed(args.seed, deterministic=args.deterministic)
     cfg.seed = args.seed
-    meta['seed'] = args.seed
-    meta['exp_name'] = osp.basename(args.config)
+    return logger
 
+def load_words(file_name):
+    allowed_words = []
+    with open(file_name) as f:
+        for line in f:
+            line = line.replace('\n', '')
+            allowed_words.append(line)
+    return allowed_words
+
+def load_model(cfg, args, dataset):
     model = build_model(
         cfg.model,
         train_cfg=cfg.get('train_cfg'),
@@ -483,6 +432,41 @@ def main():
     elif hasattr(dataset, 'PALETTE'):
         # segmentation dataset has `PALETTE` attribute
         model.PALETTE = dataset.PALETTE
+    return model
+
+def main():
+    args = parse_args()
+
+    cfg = Config.fromfile(args.config)
+    logger = setup(args, cfg)
+
+    if args.resume_from is not None:
+        cfg.resume_from = args.resume_from
+
+    if args.autoscale_lr:
+        # apply the linear scaling rule (https://arxiv.org/abs/1706.02677)
+        cfg.optimizer['lr'] = cfg.optimizer['lr'] * len(cfg.gpu_ids) / 8
+
+    # init the meta dict to record some important information such as
+    # environment info and seed, which will be logged
+    meta = dict()
+    # log env info
+    env_info_dict = collect_env()
+    env_info = '\n'.join([(f'{k}: {v}') for k, v in env_info_dict.items()])
+    dash_line = '-' * 60 + '\n'
+    logger.info('Environment info:\n' + dash_line + env_info + '\n' +
+                dash_line)
+    meta['env_info'] = env_info
+    meta['config'] = cfg.pretty_text
+
+    # log some basic info
+    logger.info(f'Distributed training: {cfg.distributed}')
+    logger.info(f'Config:\n{cfg.pretty_text}')
+
+    meta['seed'] = args.seed
+    meta['exp_name'] = osp.basename(args.config)
+
+
 
     def load_words(file_name):
         allowed_words = []
@@ -492,43 +476,41 @@ def main():
                 allowed_words.append(line)
         return allowed_words
 
-    allowed_words = load_words(args.allowed_words)
+    allowed_words = load_words(cfg.allowed_words)
 
-    logger.info(f'Model:\n{model}')
-    logger = get_root_logger(cfg.log_level)
-    
-    
     datasets = build_dataset(cfg.data.train)
-    # import pdb; pdb.set_trace()
-    if 'imgs_per_gpu' in cfg.data:
-        logger.warning('"imgs_per_gpu" is deprecated in MMDet V2.0. '
-                       'Please use "samples_per_gpu" instead')
-        if 'samples_per_gpu' in cfg.data:
-            logger.warning(
-                f'Got "imgs_per_gpu"={cfg.data.imgs_per_gpu} and '
-                f'"samples_per_gpu"={cfg.data.samples_per_gpu}, "imgs_per_gpu"'
-                f'={cfg.data.imgs_per_gpu} is used in this experiments')
-        else:
-            logger.warning(
-                'Automatically set "samples_per_gpu"="imgs_per_gpu"='
-                f'{cfg.data.imgs_per_gpu} in this experiments')
-        cfg.data.samples_per_gpu = cfg.data.imgs_per_gpu
-
-    train_loaders = build_dataloader( datasets, cfg.data.samples_per_gpu, cfg.data.workers_per_gpu, len(cfg.gpu_ids), dist=distributed, seed=cfg.seed)
-
-    
+    load_gpu(cfg, logger)
+    datasets.is_vis_on_test = False
+    train_loaders = build_dataloader( 
+        datasets, 
+        cfg.data.samples_per_gpu, 
+        cfg.data.workers_per_gpu, 
+        len(cfg.gpu_ids), 
+        dist=cfg.distributed, 
+        seed=cfg.seed
+    )
     val_dataset = build_dataset(cfg.data.test)
     val_loader = build_dataloader(
         val_dataset,
         samples_per_gpu=1,
         workers_per_gpu=cfg.data.workers_per_gpu,
-        dist=distributed,
-        shuffle=False)
+        dist=cfg.distributed,
+        shuffle=False
+    )
+    
+    model = load_model(cfg, args, datasets)
+    logger.info(f'Model:\n{model}')
+    logger = get_root_logger(cfg.log_level)
+    
+
+
+    
 
     # put model on gpus
-    if not distributed:
-        model = MMDataParallel(
-            model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
+    if not cfg.distributed:
+        # model = MMDataParallel(
+        #     model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
+        model = model.cpu()
     else:
         find_unused_parameters = cfg.get('find_unused_parameters', False)
         # Sets the `find_unused_parameters` parameter in
@@ -553,6 +535,7 @@ def main():
         train_loaders=train_loaders,
         val_loader=val_loader,
         rank=rank,
+        device='cpu',
         world_size=world_size,
         num_samples=cfg.num_samples,
         max_epochs=cfg.max_epochs,
