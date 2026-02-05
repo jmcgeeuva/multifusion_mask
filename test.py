@@ -22,8 +22,82 @@ import argparse
 import time
 from copy import deepcopy
 from torch import optim
+from datetime import datetime
 import numpy as np
+from augmentation import get_augmentation
 # export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
+
+def plot_bbox(image, bboxes, labels, print_labels=False, name='test.png'):
+   # Create a figure and axes  
+    fig, ax = plt.subplots()  
+      
+    # Display the image  
+    ax.imshow(image.permute(1, 2, 0))  
+      
+    # Plot each bounding box  
+    for bbox, label in zip(bboxes, labels):  
+        # Unpack the bounding box coordinates  
+        x1, y1, x2, y2 = bbox  
+        # Create a Rectangle patch  
+        rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')  
+        # Add the rectangle to the Axes  
+        ax.add_patch(rect)  
+        # Annotate the label  
+        if print_labels:
+            plt.text(x1, y1, label, color='white', fontsize=8, bbox=dict(facecolor='red', alpha=0.5))  
+      
+    # Remove the axis ticks and labels  
+    ax.axis('off')  
+      
+    # Show the plot  
+    plt.savefig(f'{name}.png')  
+
+def print_images(img, idx, separate=False, norm=True, name='test'):
+    img = img[idx].permute(0, 2, 3, 1)
+
+    if norm:
+        img = (img - img.min()) / (img.max() - img.min())
+        
+    img1 = img[0, ...]
+    img2 = img[1, ...]
+    img3 = img[2, ...]
+    img4 = img[3, ...]
+    img5 = img[4, ...]
+    img6 = img[5, ...]
+
+    if separate:
+        for cnt, (image, angle) in enumerate(zip([img1, img2, img3, img4, img5, img6], 
+                                ["CAMERA_FRONT", "CAMERA_FRONT_RIGHT", "CAMERA_FRONT_LEFT", "CAMERA_BACK", "CAMERA_BACK_LEFT", "CAMERA_BACK_RIGHT"])):
+            plt.figure()
+            plt.imshow(image)
+            plt.title(angle)
+            plt.axis('off')
+            plt.savefig(f'{name}_{cnt}_{angle}.png')
+    else:
+        plt.figure()
+        fig, ax = plt.subplots(2, 3)
+
+        ax[0, 0].imshow(img1)
+        ax[0, 0].set_title(f"CAMERA_FRONT")
+        ax[0, 0].axis('off')
+        ax[0, 1].imshow(img2)
+        ax[0, 1].set_title(f"CAMERA_FRONT_RIGHT")
+        ax[0, 1].axis('off')
+        ax[0, 2].imshow(img3)
+        ax[0, 2].set_title(f"CAMERA_FRONT_LEFT")
+        ax[0, 2].axis('off')
+        ax[1, 0].imshow(img4)
+        ax[1, 0].set_title(f"CAMERA_BACK")
+        ax[1, 0].axis('off')
+        ax[1, 1].imshow(img5)
+        ax[1, 1].set_title(f"CAMERA_BACK_LEFT")
+        ax[1, 1].axis('off')
+        ax[1, 2].imshow(img6)
+        ax[1, 2].set_title(f"CAMERA_BACK_RIGHT")
+        ax[1, 2].axis('off')
+        plt.tight_layout()
+        plt.savefig(f'{name}.png')
+
 
 def overlay_image(image, mask, texture, debug=False):
     contour = torch.where((mask == 1), torch.zeros(1, device=mask.device), torch.ones(1, device=mask.device)).to(device=mask.device)
@@ -62,36 +136,50 @@ def bbox_xyxy_from_mask_torch(mask: torch.Tensor):
     boxes = torch.stack([x_min, y_min, x_max, y_max], dim=1)
     return boxes
 
-def tex_trans(camou, size=4096):
-    """
-    Flip, rotate, and crop the camouflage texture
-    """
-    camou_column = []
-    for i in range(6):
-        camou_row_list = []
-        for j in range(6):
-            camou1 = transforms.RandomHorizontalFlip(p=0.5)(camou.permute(0, 3, 1, 2)[0])
-            camou2 = transforms.RandomVerticalFlip(p=0.5)(camou1)
-            if np.random.rand(1)>0.5:
-                camou3 = transforms.functional.rotate(camou2, 90)
-            else:
-                camou3 = camou2
-            camou_row_list.append(camou3)
-        camou_row = torch.cat(tuple(camou_row_list), 1)
-        camou_column.append(camou_row)
-    camou_full = torch.cat(tuple(camou_column), 2).unsqueeze(0)
-    camou_crop = transforms.RandomCrop(size)(camou_full).permute(0, 2, 3, 1)
-    return camou_crop
+class RandomRotate():
+    def __init__(self, p, angle):
+        self.angle = angle
+        self.p = p
+
+    def __call__(self, camou2):
+        if np.random.rand(1)>self.p:
+            camou3 = transforms.functional.rotate(camou2, self.angle)
+        else:
+            camou3 = camou2
+        return camou3
+
+# def tex_trans(camou, num_rows=6, num_cols=6, size=4096):
+#     """
+#     Flip, rotate, and crop the camouflage texture
+#     """
+#     horizontal_flip = transforms.RandomHorizontalFlip(p=0.5)
+#     vertical_flip = transforms.RandomVerticalFlip(p=0.5)
+#     random_rotate = RandomRotate(p=0.5, angle=90)
+#     random_crop = transforms.RandomCrop(size)
+
+#     camou_column = []
+#     for i in range(num_cols):
+#         camou_row_list = []
+#         for j in range(num_rows):
+#             camou1 = horizontal_flip(camou.permute(0, 3, 1, 2)[0])
+#             camou2 = vertical_flip(camou1)
+#             camou3 = random_rotate(camou2)
+#             camou_row_list.append(camou3)
+#         camou_row = torch.cat(tuple(camou_row_list), 1)
+#         camou_column.append(camou_row)
+#     camou_full = torch.cat(tuple(camou_column), 2).unsqueeze(0)
+#     camou_crop = random_crop(camou_full).permute(0, 2, 3, 1)
+#     return camou_crop
             
 def mask_imgs(yolo_model, imgs, camou_para, allowed_words, device, num_samples = 1, dynamic_check=False, ratio_check=2e-3, debug=False):
     
     if debug:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         directory_name = f"output_imgs_{timestamp}"
-        os.makedirs(directory_name, exists_ok=True)
+        os.makedirs(directory_name, exist_ok=True)
         print(f"Directory '{directory_name}' created.")
-        print_images(imgs, 0, norm=False, name=f'{directory_name}/dark.png')
-        print_images(imgs, 0, norm=True, name=f'{directory_name}/norm.png')
+        # print_images(imgs, 0, norm=False, name=f'{directory_name}/dark.png')
+        print_images(imgs, 0, separate=True, norm=True, name=f'{directory_name}/norm')
     
     range_num = imgs.max() - imgs.min()
     min_num = imgs.min()
@@ -124,13 +212,7 @@ def mask_imgs(yolo_model, imgs, camou_para, allowed_words, device, num_samples =
         ratio_indices = (ratio > ratio_check).nonzero(as_tuple=True)[0]
         if ratio_indices.numel() != 0:
             if debug:
-                plot_masks(masks, labels, batches, angles, imgs, name=directory_name+'/test{}.png')
-            
-            # unnormalize
-            imgs_overlayed = overlay_image(imgs_norm[batches, angles, :, :], masks.unsqueeze(1).repeat(1, 3, 1, 1), camou_para.permute(0, 3, 1, 2))
-            imgs_unnorm = (imgs_overlayed * range_num) + min_num
-            imgs_unnorm.to(device=device)
-
+                plot_masks(masks, labels, batches, angles, imgs, separate=True, name=directory_name+'/test')
 
             # Have to switch to cpu because it does not handle small tensors well 
             for i in range(imgs.shape[0]):
@@ -146,47 +228,55 @@ def mask_imgs(yolo_model, imgs, camou_para, allowed_words, device, num_samples =
                     continue
                 
                 # Sample from the distribution of target sizes num_samples amount of examples
-                r_idx = torch.multinomial(prob.cpu(), num_samples, replacement=True).to(device)
+                r_idx = torch.multinomial(prob.cpu(), 1, replacement=True).to(device)
 
                 choice = t_filtered[r_idx].to(device=device)
                 
                 assert masks.device == imgs.device, f"devices of mask and model do not match {masks.device} != {imgs.device}"
                 assert angles.device == imgs.device, f"devices of angles and model do not match {angles.device} != {imgs.device}"
-                assert imgs_unnorm.device == imgs.device, f"devices of imgs_unnorm and model do not match {imgs_unnorm.device} != {imgs.device}"
                 masks_chosen = masks[choice]
                 angles_chosen = angles[choice]
-                imgs_chosen = imgs_unnorm[choice]
             
                 # sum the masks from the same classes so that there are multiple images in one mask
-                # unique_angles, inverse_indices = torch.unique(angles_chosen, return_inverse=True)
-                # num_unique = unique_angles.numel()
-                # summed_masks = torch.zeros(num_unique, *masks_chosen.shape[1:], device=masks_chosen.device, dtype=masks_chosen.dtype)
-                # summed_masks.scatter_add_(0, inverse_indices.view(-1, 1, 1).expand_as(masks_chosen), masks_chosen)
+                # if num_samples > 1:
+                #     unique_angles, inverse_indices = torch.unique(angles_chosen, return_inverse=True)
+                #     num_unique = unique_angles.numel()
+                #     summed_masks = torch.zeros(num_unique, *masks_chosen.shape[1:], device=masks_chosen.device, dtype=masks_chosen.dtype)
+                #     summed_masks.scatter_add_(0, inverse_indices.view(-1, 1, 1).expand_as(masks_chosen), masks_chosen)
+                    
+                #     imgs_overlayed = overlay_image(imgs_norm[i, unique_angles, :, :], summed_masks.unsqueeze(1).repeat(1, 3, 1, 1), camou_para.permute(0, 3, 1, 2))
+                #     imgs_chosen = (imgs_overlayed * range_num) + min_num
+                #     imgs_processed[i, unique_angles, :, :, :] = imgs_chosen.to(device=device)
                 
                 imgs_overlayed = overlay_image(imgs_norm[i, angles_chosen, :, :], masks_chosen.unsqueeze(1).repeat(1, 3, 1, 1), camou_para.permute(0, 3, 1, 2))
                 imgs_chosen = (imgs_overlayed * range_num) + min_num
                 imgs_processed[i, angles_chosen, :, :, :] = imgs_chosen.to(device=device)
         if debug:
-            print_images(imgs.detach(), 0, norm=True, name=f'{directory_name}/masked.png')
+            # just print first batch
+            print_images(imgs_processed.detach(), 0, norm=True, separate=True, name=f'{directory_name}/masked')
+            
+            
             labels = [yolo_model.names[label] for i, label in enumerate(labels) if i in ratio_indices]
             batches = [label for i, label in enumerate(batches) if i in ratio_indices]
             angles = [label for i, label in enumerate(angles) if i in ratio_indices]
             bboxes = bboxes[ratio_indices]
-            plot_bbox(imgs_norm[batches, angles, :, :][0], [bboxes[0]], [labels[0]])
-            plt.figure()
-            plt.subplot(1, 2, 1)
-            plt.imshow(imgs_processed[0].permute(1,2, 0).cpu().detach().numpy())
-            plt.title('car')
-            plt.axis('off')
-            plt.subplot(1, 2, 2)
-            plt.imshow(masks[0].cpu().detach().numpy())
-            plt.title(f'mask')
-            plt.axis('off')
-            plt.savefig(f'{directory_name}/overlay.png')
+            plot_bbox(imgs_norm[batches, angles, :, :][0], [bboxes[0]], [labels[0]], name=f'{directory_name}/bbox')
+            
+            
+            # plt.figure()
+            # plt.subplot(1, 2, 1)
+            # plt.imshow(imgs_processed[batches, angles, :, :][0].permute(1,2, 0).cpu().detach().numpy())
+            # plt.title('car')
+            # plt.axis('off')
+            # plt.subplot(1, 2, 2)
+            # plt.imshow(masks[0].cpu().detach().numpy())
+            # plt.title(f'mask')
+            # plt.axis('off')
+            # plt.savefig(f'{directory_name}/overlay.png')
     
     return [DC([imgs_processed], stack=False, cpu_only=False)]
 
-def test_attack(model, yolo_model, data_loader, camou_para1, no_attack=False, allowed_words= ['car', 'bicycle', 'person'], cfg=None, img_size=(384, 1056), H=1056, W=1056, resolution=8, tmpdir=None, gpu_collect=False):
+def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attack=False, allowed_words= ['car', 'bicycle', 'person'], cfg=None, img_size=(384, 1056), H=1056, W=1056, resolution=8, tmpdir=None, gpu_collect=False):
     """Test model with multiple gpus.
 
     This method tests model with multiple gpus and collects the results
@@ -218,8 +308,8 @@ def test_attack(model, yolo_model, data_loader, camou_para1, no_attack=False, al
         with torch.no_grad():
             if not no_attack:
                 imgs = data['img'][0].data[0]
-                camou_trans = tex_trans(camou_para1, size=img_size)
-                learned_img = mask_imgs(yolo_model, imgs, camou_trans, allowed_words, device=imgs.device, debug=debug)
+                camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
+                learned_img = mask_imgs(yolo_model, imgs, camou_trans, allowed_words, device=imgs.device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=cfg.num_samples, debug=cfg.debug)
                 data['img'] = learned_img
             result = model(
                 return_loss=False,  # FIXME turn this to true and the whole thing explodes
@@ -246,14 +336,13 @@ def test_attack(model, yolo_model, data_loader, camou_para1, no_attack=False, al
         results = collect_results_cpu(results, len(dataset), tmpdir)
     return results
 
-def load_camou(camou_path, device):
+def load_camou(camou_path, expand_kernel, device):
     arr = np.load(camou_path)   # e.g., shape (H, W, 3) or any dimensions
     # Convert to torch tensor
-    camou_para = torch.from_numpy(arr).float().to(device)
-
-    camou_para = torch.rand([1, h, w, 3]).float().to(device)
+    camou_para = torch.from_numpy(arr).to(device)
     camou_para.requires_grad_(True)
     camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+    camou_para1 = torch.clamp(camou_para1, 0, 1)
     return camou_para, camou_para1
 
 # def train_attack_single_gpu(model,
@@ -325,7 +414,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description='MMDet test (and eval) a model')
     parser.add_argument('config', help='test config file path')
-    parser.add_argument('checkpoint', help='checkpoint file')
+    # parser.add_argument('checkpoint', help='checkpoint file')
     parser.add_argument('--camou', help='')
     parser.add_argument(
         '--no-attack',
@@ -368,7 +457,7 @@ def parse_args():
         '--tmpdir',
         help='tmp directory used for collecting results from multiple '
         'workers, available when gpu-collect is not specified')
-    parser.add_argument('--seed', type=int, default=0, help='random seed')
+    parser.add_argument('--seed', type=int, default=None, help='random seed')
     parser.add_argument(
         '--deterministic',
         action='store_true',
@@ -474,6 +563,12 @@ def main():
     # set random seeds
     if args.seed is not None:
         set_random_seed(args.seed, deterministic=args.deterministic)
+    else:
+        import random
+        args.seed = int(random.random()*10e7)
+        # logger.info(f'Set random seed to {args.seed}, '
+        #             f'deterministic: {args.deterministic}')
+        set_random_seed(args.seed, deterministic=args.deterministic)
 
     # build the dataloader
     # export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
@@ -490,7 +585,7 @@ def main():
     fp16_cfg = cfg.get('fp16', None)
     if fp16_cfg is not None:
         wrap_fp16_model(model)
-    checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
+    checkpoint = load_checkpoint(model, cfg.checkpoint, map_location='cpu')
     if args.fuse_conv_bn:
         model = fuse_conv_bn(model)
     # old versions did not save class info in checkpoints, this walkaround is
@@ -514,7 +609,7 @@ def main():
                 allowed_words.append(line)
         return allowed_words
 
-    allowed_words = load_words('./allowed_words.txt')
+    allowed_words = load_words(cfg.allowed_words)
 
 
     if not distributed:
@@ -543,8 +638,11 @@ def main():
 
         #####################################################################################
         # continuous color
-        
-        camou_para, camou_para1 = load_camou(args.camou, device=model.device)
+        if cfg.camou_path is None:
+            raise ValueError('camou path is None')
+        camou_para, camou_para1 = load_camou(cfg.camou_path, expand_kernel, device=model.device)
+        img_size=(384, 1056)
+        tex_trans = get_augmentation(img_size)
         #####################################################################################
         outputs = test_attack(
             model=model,
@@ -552,6 +650,7 @@ def main():
             yolo_model=yolo_model, 
             data_loader=data_loader,
             camou_para1=camou_para1,
+            tex_trans=tex_trans,
             allowed_words=allowed_words, 
             tmpdir=args.tmpdir,
             gpu_collect=args.gpu_collect, 
@@ -576,9 +675,9 @@ def main():
             ]:
                 eval_kwargs.pop(key, None)
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
-            if args.result_dir is not None:
-                eval_kwargs.update(pklfile_prefix=os.path.dirname(args.result_dir))
-            print(dataset.evaluate(outputs, **eval_kwargs))
+            # if args.result_dir is not None:
+            #     eval_kwargs.update(pklfile_prefix=os.path.dirname(args.result_dir))
+            print(dataset.evaluate(outputs, out_dir='./', show=False, **eval_kwargs))
 
 
 if __name__ == '__main__':

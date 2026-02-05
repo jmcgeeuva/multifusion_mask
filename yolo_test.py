@@ -196,19 +196,27 @@ def run_yolo8(model, tensor_list, width, height, device, search_labels= ['car', 
 
     return mask_list, labels, batches, angles
 
-def plot_masks(mask_entry, labels, batches, angles, orig_images, name='test{}.png'):
-    cnt = 0
-    fig, axes = plt.subplots(2, mask_entry.shape[0])
-    for entry, label, batch, angle in zip(mask_entry, labels, batches, angles):
-        plt.figure()
-        plt.subplot(1, 2, 1)
-        plt.imshow(transforms.ToPILImage()(entry))
-        plt.axis('off')
-        plt.subplot(1, 2, 2)
-        plt.imshow(transforms.ToPILImage()(orig_images[batch, angle]))
-        plt.axis('off')
-        plt.savefig(name.format(cnt))
-        cnt += 1
+def plot_masks(mask_entry, labels, batches, angles, orig_images, separate=False, name='test'):
+    if separate:
+        cnt = 0
+        for entry, label, batch, angle in zip(mask_entry, labels, batches, angles):
+            plt.figure()
+            plt.imshow(transforms.ToPILImage()(entry))
+            plt.axis('off')
+            plt.savefig(f'{name}{cnt}_{angle}.png')
+            cnt += 1
+    else:
+        cnt = 0
+        for entry, label, batch, angle in zip(mask_entry, labels, batches, angles):
+            plt.figure()
+            plt.subplot(1, 2, 1)
+            plt.imshow(transforms.ToPILImage()(entry))
+            plt.axis('off')
+            plt.subplot(1, 2, 2)
+            plt.imshow(transforms.ToPILImage()(orig_images[batch, angle]))
+            plt.axis('off')
+            plt.savefig(f'{name}{cnt}.png')
+            cnt += 1
 
 def main():
     parser = argparse.ArgumentParser()
