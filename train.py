@@ -178,15 +178,16 @@ def train_attack(
             optimizer.zero_grad(set_to_none=True)
             
             imgs = data['img'].data[0]
+            mask_img = data['masks'].data[0]
             batch_size = imgs.shape[0]
             # imgs = imgs.to(device=device)
             camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
-            learned_camou = mask_imgs(yolo_model, imgs, camou_trans, allowed_words, device=imgs.device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=num_samples, debug=cfg.debug)[0]
+            learned_camou = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=imgs.device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=num_samples, debug=cfg.debug)[0]
             # assert learned_camou.data[0].requires_grad, "Learned_camou does not require gradient"
             # learned_camou.data[0] = learned_camou.data[0].cpu()
             
             data['img'] = learned_camou
-            
+
             losses = model(return_loss=True, **data)
             # out = model.train_step(data, optimizer)
             heatmap_loss = cfg.gamma_heatmap*losses['loss_heatmap']
@@ -195,7 +196,12 @@ def train_attack(
 
             loss_tensor = heatmap_loss+cls_loss+bbox_loss
             # Want to increase the error
-            total_loss = cfg.lambda_reduce*(2 - (loss_tensor))
+            # FIXME NON-ADVERSARIAL CAN BE TESTED HERE BY REMOVING "2 -" and making it a loss minimization problem
+            non_adv = True
+            if not non_adv:
+                total_loss = cfg.lambda_reduce*(2 - (loss_tensor))
+            else:
+                total_loss = cfg.lambda_reduce*((loss_tensor))
             # Smoothing of the camouflage
             total_loss = total_loss + cfg.lambda_smooth*(loss_smooth(camou_para))
             total_loss = total_loss + cfg.lambda_nps*(loss_nps(camou_para, color_set))

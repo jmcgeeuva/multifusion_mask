@@ -6,7 +6,7 @@ class_names = [
 
 ################################ ATTACK VARIABLES ####################################
 checkpoint='./IS-Fusion/ckpt/IS-Fusion_epoch_10.pth'
-debug = True
+debug = False
 max_epochs=1000
 camou_path="/scratch/tkg5kq/av_project/multifusion_mask/workdir/20251111_215729/2camou.npy"
 
@@ -275,7 +275,7 @@ db_sampler = dict(
 )
 
 train_pipeline = [
-    dict(type='LoadMultiViewImageFromFilesV2', to_float32=True),
+    dict(type='LoadMultiViewImageFromFilesV2_Camou', to_float32=True),
     dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
@@ -294,7 +294,7 @@ train_pipeline = [
     dict(type='ModalMask3D', mode='train', stop_epoch=total_epochs-2,),
 
     dict(
-        type='ImageAug3D',
+        type='ImageAug3D_Camou',
         final_dim=img_scale,
         resize_lim=[0.57, 0.825],
         bot_pct_lim=[0.0, 0.0],
@@ -317,7 +317,7 @@ train_pipeline = [
     dict(type='ObjectNameFilter', classes=class_names),
 
     dict(
-        type='ImageNormalize',
+        type='ImageNormalize_Camou',
         mean=[0.485, 0.456, 0.406],
         std=[0.229, 0.224, 0.225]),
 
@@ -325,9 +325,9 @@ train_pipeline = [
 
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     # dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d']) # if lidar-only
-    dict(type='Collect3DV2', keys=['points', 'img', 'gt_bboxes_3d', 'gt_labels_3d'],
+    dict(type='Collect3DV2', keys=['points', 'img', 'masks', 'gt_bboxes_3d', 'gt_labels_3d'],
          meta_keys=[
-             'camera_intrinsics', 'camera2ego', 'lidar2ego', 'lidar2camera',
+             'camera_intrinsics', 'camera2ego', 'lidar2ego', 'lidar2camera', 
              'camera2lidar', 'lidar2img', 'img_aug_matrix', 'lidar_aug_matrix',
          ])
 ]
@@ -347,7 +347,7 @@ test_pipeline = [
         use_dim=[0, 1, 2, 3, 4],
         painting=False,
     ),
-    dict(type='LoadMultiViewImageFromFilesV2', to_float32=True),
+    dict(type='LoadMultiViewImageFromFilesV2_Camou', to_float32=True),
     # dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_bbox=True, with_label=True),
 
     dict(
@@ -359,7 +359,7 @@ test_pipeline = [
         pcd_vertical_flip=False,
         transforms=[
             dict(
-                type='ImageAug3D',
+                type='ImageAug3D_Camou',
                 final_dim=img_scale,
                 resize_lim=[0.72, 0.72],
                 bot_pct_lim=[0.0, 0.0],
@@ -367,7 +367,7 @@ test_pipeline = [
                 rand_flip=False,
                 is_train=False),
             dict(
-                type='ImageNormalize',
+                type='ImageNormalize_Camou',
                 mean=[0.485, 0.456, 0.406],
                 std=[0.229, 0.224, 0.225]),
             dict(
@@ -383,7 +383,7 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3DV2', keys=['points', 'img'],
+            dict(type='Collect3DV2', keys=['points', 'img', 'masks'],
                  meta_keys=[
                      'camera_intrinsics', 'camera2ego', 'lidar2ego', 'lidar2camera',
                      'camera2lidar', 'lidar2img', 'img_aug_matrix', 'lidar_aug_matrix',
