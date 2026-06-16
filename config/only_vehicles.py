@@ -5,10 +5,10 @@ class_names = [
 # class_names = ['traffic_cone', 'truck', 'car', 'pedestrian', 'movable_object.pushable_pullable', 'construction_vehicle', 'barrier', 'movable_object.debris', 'motorcycle', 'bicycle']
 
 ################################ ATTACK VARIABLES ####################################
-checkpoint='./IS-Fusion/ckpt/IS-Fusion_epoch_10.pth'
+checkpoint='./pretrained_models/IS-Fusion_epoch_10.pth'
 debug = False
 max_epochs=1000
-camou_path="/scratch/tkg5kq/av_project/multifusion_mask/workdir/20251111_215729/2camou.npy"
+camou_path="./workdir/20251111_215729/2camou.npy"
 
 ################# ablation ###################
 freq = 0
@@ -218,7 +218,7 @@ model = dict(
 # For nuScenes we usually do 10-class detection
 dataset_type = 'NuScenesDataset'
 data_root2 = './data/nuscenes/'
-data_root = '../data/nuscenes/'
+data_root = './data/nuscenes/'
 
 # Input modality for nuScenes dataset, this is consistent with the submission
 # format which requires the information in input_modality.
@@ -473,7 +473,7 @@ log_config = dict(
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = None
-load_from = 'data/pretrain_models/swint-nuimages-pretrained-e2e.pth'
+load_from = './pretrain_models/swint-nuimages-pretrained-e2e.pth'
 resume_from = None
 workflow = [('train', 1)]
 gpu_ids = range(0, 8)
