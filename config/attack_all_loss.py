@@ -5,7 +5,7 @@ class_names = [
 # class_names = ['traffic_cone', 'truck', 'car', 'pedestrian', 'movable_object.pushable_pullable', 'construction_vehicle', 'barrier', 'movable_object.debris', 'motorcycle', 'bicycle']
 
 ################################ ATTACK VARIABLES ####################################
-checkpoint='./IS-Fusion/ckpt/IS-Fusion_epoch_10.pth'
+checkpoint='./IS-Fusion_epoch_10.pth'
 debug = False
 max_epochs=1000
 # camou_path="/scratch/tkg5kq/av_project/multifusion_mask/workdir/20251112_120525/0camou.npy"
