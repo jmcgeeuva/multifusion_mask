@@ -14,6 +14,7 @@ camou_path="./workdir/20251111_215729/2camou.npy"
 freq = 0
 num_samples=1
 allowed_words='./vehicle_words.txt'
+target_class='car'  # nuScenes class name logged in the attack log for filtering
 dynamic_ratio=False
 area_ratio=0.002
 gamma_heatmap = 1

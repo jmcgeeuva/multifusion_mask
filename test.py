@@ -28,6 +28,17 @@ from augmentation import get_augmentation
 import random
 # export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
 
+# Maps YOLO/COCO class names to nuScenes detection class names.
+YOLO_TO_NUSCENES = {
+    'car':          'car',
+    'truck':        'truck',
+    'bus':          'bus',
+    'bicycle':      'bicycle',
+    'motorcycle':   'motorcycle',
+    'person':       'pedestrian',
+    'trailer':      'trailer',
+}
+
 # class RandomRotate():
 #     def __init__(self, p, angle):
 #         self.angle = angle
@@ -68,11 +79,14 @@ def overlay_image(image, mask, texture):
     overlayed = torch.where((contour == 1.), image.to(device=contour.device), texture.to(device=contour.device)).to(device=mask.device)
     return overlayed
             
-def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num_samples = 1, dynamic_check=False, ratio_check=2e-3, debug=False):
+def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num_samples = 1, dynamic_check=False, ratio_check=2e-3, debug=False, target_class=None):
     # # B x 6 x 3 x H x W
     # imgs = data['img'][0].data[0]
     # mask_img = data['masks'][0].data[0]
-    
+
+    B = imgs.shape[0]
+    attack_meta = [None] * B
+
     # normalize image
     range_num = imgs.max() - imgs.min()
     min_num = imgs.min()
@@ -81,7 +95,42 @@ def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num
     imgs_overlayed = overlay_image(imgs_norm, mask_img, camou_para.permute(0, 3, 1, 2))
     imgs_processed = (imgs_overlayed * range_num) + min_num
 
-    return [DC([imgs_processed], stack=False, cpu_only=False)]
+    # Derive per-sample attack metadata from the precomputed mask.
+    # Use explicit target_class if provided; fall back to first allowed_word.
+    if target_class:
+        nuscenes_cls = target_class
+    else:
+        nuscenes_cls = YOLO_TO_NUSCENES.get(allowed_words[0], allowed_words[0]) if allowed_words else 'car'
+    try:
+        m = mask_img.detach()
+        # Collapse any channel dim so m is [B, 6, H, W] or [1, 6, H, W] or [6, H, W].
+        while m.dim() > 4:
+            m = m[..., 0, :, :]
+        if m.dim() == 3:
+            m = m.unsqueeze(0).expand(B, -1, -1, -1)
+        elif m.shape[0] == 1 and B > 1:
+            m = m.expand(B, -1, -1, -1)
+        for b in range(B):
+            per_cam = m[b]  # [6, H, W]
+            areas = (per_cam > 0).float().sum(dim=(1, 2))  # [6]
+            if areas.max() > 0:
+                cam_idx = int(areas.argmax())
+                cam_mask = per_cam[cam_idx] > 0  # [H, W] bool
+                rows = cam_mask.any(dim=1)
+                cols = cam_mask.any(dim=0)
+                y1 = int(rows.nonzero(as_tuple=False)[0])
+                y2 = int(rows.nonzero(as_tuple=False)[-1])
+                x1 = int(cols.nonzero(as_tuple=False)[0])
+                x2 = int(cols.nonzero(as_tuple=False)[-1])
+                attack_meta[b] = {
+                    'nuscenes_class': nuscenes_cls,
+                    'camera_idx': cam_idx,
+                    'bbox_2d': [x1, y1, x2, y2],
+                }
+    except Exception:
+        pass
+
+    return [DC([imgs_processed], stack=False, cpu_only=False)], attack_meta
     # H, W = imgs_norm.shape[-2], imgs_norm.shape[-1]  # example shape
     # masks, labels, batches, angles = run_yolo8(
     #         yolo_model, 
@@ -203,6 +252,7 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
     """
     model.eval()
     results = []
+    attack_log_local = {}
     dataset = data_loader.dataset
     rank, world_size = get_dist_info()
     if rank == 0:
@@ -210,22 +260,36 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
     time.sleep(2)  # This line can prevent deadlock problem in some cases.
     debug=False
 
+    # DistributedSampler with shuffle=False is deterministic; iterate once to
+    # get the exact dataset-index for each position in the loader.
+    sampler_indices = list(iter(data_loader.sampler))
+    batch_size_dl = data_loader.batch_size or 1
+
     for i, data in enumerate(data_loader):
         with torch.no_grad():
             if not no_attack:
                 camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
 
-                
                 imgs = data['img'][0].data[0]
                 mask_img = data['masks'][0].data[0]
-                learned_img = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=imgs.device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=cfg.num_samples, debug=cfg.debug)
+                learned_img, attack_meta = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=imgs.device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=cfg.num_samples, debug=cfg.debug, target_class=getattr(cfg, 'target_class', None))
                 data['img'] = learned_img
+
+                # Map batch positions to nuScenes sample tokens.
+                batch_ds_indices = sampler_indices[i * batch_size_dl : (i + 1) * batch_size_dl]
+                for b_idx, info in enumerate(attack_meta):
+                    if info is not None:
+                        ds_idx = batch_ds_indices[b_idx]
+                        token = dataset.data_infos[ds_idx]['token']
+                        attack_log_local[token] = info
+                    else:
+                        print('info is none')
+
             result = model(
                 return_loss=False,  # FIXME turn this to true and the whole thing explodes
-                rescale=True, 
+                rescale=True,
                 **data
             )
-            # result = model(return_loss=False, rescale=True, **data)
             # encode mask results
             if isinstance(result[0], tuple):
                 result = [(bbox_results, encode_mask_results(mask_results))
@@ -243,7 +307,16 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
         results = collect_results_gpu(results, len(dataset))
     else:
         results = collect_results_cpu(results, len(dataset), tmpdir)
-    return results
+
+    # Merge per-GPU attack logs into a single dict on rank 0.
+    if world_size > 1:
+        all_logs = [None] * world_size
+        torch.distributed.all_gather_object(all_logs, attack_log_local)
+        attack_log = {k: v for log in all_logs for k, v in log.items()}
+    else:
+        attack_log = attack_log_local
+
+    return results, attack_log
 
 def load_camou(camou_path, expand_kernel, device):
     arr = np.load(camou_path)   # e.g., shape (H, W, 3) or any dimensions
@@ -339,6 +412,16 @@ def parse_args():
         default='none',
         help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
+    parser.add_argument(
+        '--attack-filter',
+        choices=['none', 'sample_class', 'instance'],
+        default='none',
+        help='Scope evaluation to only the attacked objects. '
+             '"none": standard full-split eval (default). '
+             '"sample_class": restrict gt/pred to samples where an attack occurred '
+             'and only the attacked class. '
+             '"instance": additionally projects 3D GT boxes to camera space and '
+             'matches against the precomputed mask bbox to isolate the attacked instance.')
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -460,6 +543,7 @@ def main():
     allowed_words = load_words(cfg.allowed_words)
 
 
+    attack_log = {}
     if not distributed:
         # model = MMDataParallel(model.cuda(), device_ids=[torch.cuda.current_device()])
         # train_attack_single_gpu(model, data_loader)
@@ -505,16 +589,16 @@ def main():
         img_size=(384, 1056)
         tex_trans = get_augmentation(img_size)
         #####################################################################################
-        outputs = test_attack(
+        outputs, attack_log = test_attack(
             model=model,
             no_attack=args.no_attack,
-            yolo_model=yolo_model, 
+            yolo_model=yolo_model,
             data_loader=data_loader,
             camou_para1=camou_para1,
             tex_trans=tex_trans,
-            allowed_words=allowed_words, 
+            allowed_words=allowed_words,
             tmpdir=args.tmpdir,
-            gpu_collect=args.gpu_collect, 
+            gpu_collect=args.gpu_collect,
             cfg=cfg
         )
 
@@ -523,7 +607,10 @@ def main():
         if args.out:
             print(f'\nwriting results to {args.out}')
             mmcv.dump(outputs, args.out)
-            # outputs = mmcv.load(args.out)
+            if args.attack_filter != 'none':
+                log_path = args.out.replace('.pkl', '_attack_log.json')
+                mmcv.dump(attack_log, log_path)
+                print(f'attack log ({len(attack_log)} samples) written to {log_path}')
         kwargs = {} if args.eval_options is None else args.eval_options
         if args.format_only:
             dataset.format_results(outputs, **kwargs)
@@ -538,6 +625,11 @@ def main():
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
             # if args.result_dir is not None:
             #     eval_kwargs.update(pklfile_prefix=os.path.dirname(args.result_dir))
+            if args.attack_filter != 'none':
+                eval_kwargs.update(
+                    attack_log=attack_log,
+                    attack_filter=args.attack_filter,
+                )
             print(dataset.evaluate(outputs, out_dir='./', show=False, **eval_kwargs))
 
 

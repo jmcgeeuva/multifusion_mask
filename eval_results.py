@@ -79,6 +79,12 @@ def load_attack_log(args):
             f'to generate it, or pass --attack-log <path> explicitly.'
         )
     attack_log = mmcv.load(log_path)
+    if len(attack_log) == 0:
+        raise ValueError(
+            f'Attack log at {log_path} is empty (0 samples). '
+            f'The attack did not fire during inference — check that mask_img '
+            f'has non-zero pixels and that the camouflage path is correct.'
+        )
     print(f'Loaded attack log: {len(attack_log)} attacked samples')
     return attack_log
 
