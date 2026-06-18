@@ -332,7 +332,7 @@ def main():
         print('ERROR: Invalid input need an angle')
         exit(0)
 
-    model = YOLO("yolo26n-seg.pt")
+    model = YOLO("yolov26n-seg.pt")
     allowed_words = load_words(args.allowed_words)
     dir_root = args.dir_root
     angle = args.angle
@@ -363,8 +363,8 @@ def main():
             with tqdm_lock:
                 progress_bar.update(1)
     
-    os.makedirs('./nuscenes_masks/train', exist_ok=True)
-    mask_dir = os.path.join('./nuscenes_masks/train', sample, angle)
+    os.makedirs('./data/nuscenes/nuscenes_masks/train', exist_ok=True)
+    mask_dir = os.path.join('./data/nuscenes/nuscenes_masks/train', sample, angle)
     os.makedirs(mask_dir, exist_ok=True)
     
     file_path = os.path.join(dir_root, sample, angle)

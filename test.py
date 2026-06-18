@@ -75,8 +75,8 @@ YOLO_TO_NUSCENES = {
 #     return camou_crop
 
 def overlay_image(image, mask, texture):
-    contour = torch.where((mask == 1), torch.zeros(1, device=mask.device), torch.ones(1, device=mask.device)).to(device=mask.device)
-    overlayed = torch.where((contour == 1.), image.to(device=contour.device), texture.to(device=contour.device)).to(device=mask.device)
+    contour = (mask < 0.5).float().to(device=mask.device)
+    overlayed = torch.where(contour == 1., image.to(device=contour.device), texture.to(device=contour.device)).to(device=mask.device)
     return overlayed
             
 def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num_samples = 1, dynamic_check=False, ratio_check=2e-3, debug=False, target_class=None):
@@ -94,6 +94,8 @@ def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num
 
     imgs_overlayed = overlay_image(imgs_norm, mask_img, camou_para.permute(0, 3, 1, 2))
     imgs_processed = (imgs_overlayed * range_num) + min_num
+
+    # print(f'[mask_imgs] mask_img shape={mask_img.shape} max={mask_img.max():.4f} min={mask_img.min():.4f}')
 
     # Derive per-sample attack metadata from the precomputed mask.
     # Use explicit target_class if provided; fall back to first allowed_word.
@@ -127,8 +129,10 @@ def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num
                     'camera_idx': cam_idx,
                     'bbox_2d': [x1, y1, x2, y2],
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        import traceback
+        print(f'[mask_imgs] exception: {e}')
+        traceback.print_exc()
 
     return [DC([imgs_processed], stack=False, cpu_only=False)], attack_meta
     # H, W = imgs_norm.shape[-2], imgs_norm.shape[-1]  # example shape
@@ -282,8 +286,7 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
                         ds_idx = batch_ds_indices[b_idx]
                         token = dataset.data_infos[ds_idx]['token']
                         attack_log_local[token] = info
-                    else:
-                        print('info is none')
+                        # print(f'attack {type(token)}')
 
             result = model(
                 return_loss=False,  # FIXME turn this to true and the whole thing explodes
@@ -310,6 +313,11 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
 
     # Merge per-GPU attack logs into a single dict on rank 0.
     if world_size > 1:
+        # Barrier ensures all ranks have exited the inference loop and completed
+        # collect_results_gpu before entering the second collective. Without this,
+        # a slow rank can still be inside the loop while a fast rank reaches
+        # all_gather_object, causing a collective mismatch / hang.
+        torch.distributed.barrier()
         all_logs = [None] * world_size
         torch.distributed.all_gather_object(all_logs, attack_log_local)
         attack_log = {k: v for log in all_logs for k, v in log.items()}
@@ -512,13 +520,21 @@ def main():
         shuffle=False)
 
     cfg.model.train_cfg = None
+    print(f'[DEBUG] Building model...', flush=True)
     model = build_model(cfg.model, test_cfg=cfg.get('test_cfg'))
+    print(f'[DEBUG] Model built successfully.', flush=True)
     fp16_cfg = cfg.get('fp16', None)
     if fp16_cfg is not None:
+        print(f'[DEBUG] Wrapping fp16 model...', flush=True)
         wrap_fp16_model(model)
+        print(f'[DEBUG] fp16 wrap done.', flush=True)
+    print(f'[DEBUG] Loading checkpoint from: {cfg.checkpoint}', flush=True)
     checkpoint = load_checkpoint(model, cfg.checkpoint, map_location='cpu')
+    print(f'[DEBUG] Checkpoint loaded successfully.', flush=True)
     if args.fuse_conv_bn:
+        print(f'[DEBUG] Fusing conv+bn...', flush=True)
         model = fuse_conv_bn(model)
+        print(f'[DEBUG] Fuse done.', flush=True)
     # old versions did not save class info in checkpoints, this walkaround is
     # for backward compatibility
     if 'CLASSES' in checkpoint.get('meta', {}):
@@ -531,6 +547,7 @@ def main():
     elif hasattr(dataset, 'PALETTE'):
         # segmentation dataset has `PALETTE` attribute
         model.PALETTE = dataset.PALETTE
+    print(f'[DEBUG] Model classes/palette set. Moving model to GPU...', flush=True)
 
     def load_words(file_name):
         allowed_words = []
@@ -549,11 +566,17 @@ def main():
         # train_attack_single_gpu(model, data_loader)
         raise ValueError('Error: Single GPU not implemented')
     else:
+        print(f'[DEBUG] Moving model to GPU...', flush=True)
+        model_on_gpu = model.cuda()
+        print(f'[DEBUG] Model on GPU. Wrapping in MMDistributedDataParallel...', flush=True)
         model = MMDistributedDataParallel(
-            model.cuda(),
+            model_on_gpu,
             device_ids=[torch.cuda.current_device()],
             broadcast_buffers=False)
+        print(f'[DEBUG] MMDistributedDataParallel wrap done.', flush=True)
+        print(f'[DEBUG] Loading YOLO model...', flush=True)
         yolo_model=YOLO('yolov8n-seg.pt')
+        print(f'[DEBUG] YOLO model loaded.', flush=True)
             
         H=1056
         W=1056
@@ -609,6 +632,8 @@ def main():
             mmcv.dump(outputs, args.out)
             if args.attack_filter != 'none':
                 log_path = args.out.replace('.pkl', '_attack_log.json')
+                if len(attack_log) == 0:
+                    raise ValueError('attack_log is blank')
                 mmcv.dump(attack_log, log_path)
                 print(f'attack log ({len(attack_log)} samples) written to {log_path}')
         kwargs = {} if args.eval_options is None else args.eval_options

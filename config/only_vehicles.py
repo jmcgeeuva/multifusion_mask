@@ -276,7 +276,7 @@ db_sampler = dict(
 )
 
 train_pipeline = [
-    dict(type='LoadMultiViewImageFromFilesV2_Camou', to_float32=True),
+    dict(type='LoadMultiViewImageFromFilesV2_Camou', to_float32=True, mask_path='./data/nuscenes/nuscenes_masks'),
     dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
@@ -348,7 +348,7 @@ test_pipeline = [
         use_dim=[0, 1, 2, 3, 4],
         painting=False,
     ),
-    dict(type='LoadMultiViewImageFromFilesV2_Camou', to_float32=True),
+    dict(type='LoadMultiViewImageFromFilesV2_Camou', to_float32=True, mask_path='./data/nuscenes/nuscenes_masks'),
     # dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_bbox=True, with_label=True),
 
     dict(
@@ -394,7 +394,7 @@ test_pipeline = [
 
 data = dict(
     samples_per_gpu=2,
-    workers_per_gpu=6,
+    workers_per_gpu=2,
     train=dict(
         type='CBGSDataset',
         # type='SimpleDataset',

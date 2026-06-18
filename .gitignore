@@ -8,3 +8,6 @@
 **/workdir/20**
 **/workdir/paras
 **/workdir/.log
+**.pkl
+**_attack_log.json
+**/logs/**
