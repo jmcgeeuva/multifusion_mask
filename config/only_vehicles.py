@@ -328,7 +328,7 @@ train_pipeline = [
     # dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d']) # if lidar-only
     dict(type='Collect3DV2', keys=['points', 'img', 'masks', 'gt_bboxes_3d', 'gt_labels_3d'],
          meta_keys=[
-             'camera_intrinsics', 'camera2ego', 'lidar2ego', 'lidar2camera', 
+             'camera_intrinsics', 'camera2ego', 'lidar2ego', 'lidar2camera',
              'camera2lidar', 'lidar2img', 'img_aug_matrix', 'lidar_aug_matrix',
          ])
 ]

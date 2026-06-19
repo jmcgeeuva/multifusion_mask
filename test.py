@@ -79,7 +79,7 @@ def overlay_image(image, mask, texture):
     overlayed = torch.where(contour == 1., image.to(device=contour.device), texture.to(device=contour.device)).to(device=mask.device)
     return overlayed
             
-def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num_samples = 1, dynamic_check=False, ratio_check=2e-3, debug=False, target_class=None):
+def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num_samples = 1, dynamic_check=False, ratio_check=2e-3, debug=False, target_class=None, img_metas=None):
     # # B x 6 x 3 x H x W
     # imgs = data['img'][0].data[0]
     # mask_img = data['masks'][0].data[0]
@@ -98,11 +98,11 @@ def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num
     # print(f'[mask_imgs] mask_img shape={mask_img.shape} max={mask_img.max():.4f} min={mask_img.min():.4f}')
 
     # Derive per-sample attack metadata from the precomputed mask.
-    # Use explicit target_class if provided; fall back to first allowed_word.
-    if target_class:
-        nuscenes_cls = target_class
-    else:
-        nuscenes_cls = YOLO_TO_NUSCENES.get(allowed_words[0], allowed_words[0]) if allowed_words else 'car'
+    # Priority: nuscenes_class from img_metas (set by loading.py from the mask
+    # directory name) → explicit target_class → first allowed_word fallback.
+    _fallback_cls = (target_class or
+                     (YOLO_TO_NUSCENES.get(allowed_words[0], allowed_words[0])
+                      if allowed_words else 'car'))
     try:
         m = mask_img.detach()
         # Collapse any channel dim so m is [B, 6, H, W] or [1, 6, H, W] or [6, H, W].
@@ -113,6 +113,12 @@ def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num
         elif m.shape[0] == 1 and B > 1:
             m = m.expand(B, -1, -1, -1)
         for b in range(B):
+            # Resolve the nuScenes class for this sample.
+            raw_cls = ''
+            if img_metas is not None and b < len(img_metas):
+                raw_cls = img_metas[b].get('nuscenes_class', '')
+            nuscenes_cls = YOLO_TO_NUSCENES.get(raw_cls, raw_cls) if raw_cls else _fallback_cls
+
             per_cam = m[b]  # [6, H, W]
             areas = (per_cam > 0).float().sum(dim=(1, 2))  # [6]
             if areas.max() > 0:
@@ -303,11 +309,12 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
     for i, data in enumerate(data_loader):
         with torch.no_grad():
             if not no_attack:
-                camou_trans = tex_trans(camou_para1, size=img_size)
+                camou_trans = tex_trans(camou_para1)
 
                 imgs = data['img'][0].data[0].to(_device)
                 mask_img = data['masks'][0].data[0].to(_device)
-                learned_img, attack_meta = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=_device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=cfg.num_samples, debug=cfg.debug, target_class=getattr(cfg, 'target_class', None))
+                _img_metas = data['img_metas'][0].data[0]
+                learned_img, attack_meta = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=_device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=cfg.num_samples, debug=cfg.debug, target_class=getattr(cfg, 'target_class', None), img_metas=_img_metas)
                 data['img'] = learned_img
 
                 # Map batch positions to nuScenes sample tokens.
