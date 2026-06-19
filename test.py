@@ -117,6 +117,7 @@ def mask_imgs(yolo_model, imgs, mask_img, camou_para, allowed_words, device, num
             raw_cls = ''
             if img_metas is not None and b < len(img_metas):
                 raw_cls = img_metas[b].get('nuscenes_class', '')
+            # print(f'The RAW CLASS is "{raw_cls}"')
             nuscenes_cls = YOLO_TO_NUSCENES.get(raw_cls, raw_cls) if raw_cls else _fallback_cls
 
             per_cam = m[b]  # [6, H, W]
@@ -309,7 +310,7 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
     for i, data in enumerate(data_loader):
         with torch.no_grad():
             if not no_attack:
-                camou_trans = tex_trans(camou_para1)
+                camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
 
                 imgs = data['img'][0].data[0].to(_device)
                 mask_img = data['masks'][0].data[0].to(_device)
