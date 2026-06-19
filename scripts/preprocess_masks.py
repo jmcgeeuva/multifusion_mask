@@ -8,13 +8,15 @@ Expected directory layout:
             mask1.jpg  mask2.jpg ...
 
 One line is written per jpg:
-    path_key <TAB> root <TAB> filename <TAB> object_class
+    path_key <TAB> root <TAB> filename <TAB> object_class <TAB> pixel_area
 
   path_key     = mask_path + 4 path components (A/B/C/<sample>) — the key
                  used by LoadMultiViewImageFromFilesV2_Camou for dict lookup
   root         = full directory path that contains the jpg
   filename     = jpg basename
   object_class = basename of root (the immediate parent directory = class name)
+  pixel_area   = number of foreground pixels (mask > 127) — used as sampling
+                 weight so larger objects are selected proportionally more often
 
 Single-process usage:
     python scripts/preprocess_masks.py \\
@@ -37,12 +39,26 @@ import sys
 import argparse
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from tqdm import tqdm
+import numpy as np
+from PIL import Image
+
+
+def _pixel_area(path):
+    """Count foreground pixels in a binary mask jpg. Returns 1 on error."""
+    try:
+        arr = np.array(Image.open(path).convert('L'), dtype=np.uint8)
+        return int((arr > 127).sum())
+    except Exception:
+        return 1
 
 
 def scan_dir(directory):
     """Scan one directory level (no recursion).
 
-    Returns (directory, subdirs, jpg_filenames).
+    Opens each jpg to compute its pixel area so the index carries weights for
+    area-proportional sampling in LoadMultiViewImageFromFilesV2_Camou.
+
+    Returns (directory, subdirs, [(jpg_filename, pixel_area)]).
     """
     subdirs, jpgs = [], []
     try:
@@ -51,7 +67,8 @@ def scan_dir(directory):
                 if entry.is_dir(follow_symlinks=False):
                     subdirs.append(entry.path)
                 elif entry.is_file() and entry.name.lower().endswith('.jpg'):
-                    jpgs.append(entry.name)
+                    area = _pixel_area(entry.path)
+                    jpgs.append((entry.name, area))
     except (PermissionError, OSError):
         pass
     return directory, subdirs, jpgs
@@ -62,7 +79,7 @@ def parallel_walk(root, num_threads):
 
     Each completed scan immediately submits its subdirectories as new tasks so
     threads stay busy across the full tree.  Returns a list of
-    (dirpath, [jpg_filenames]) for every directory that contains jpgs.
+    (dirpath, [(jpg_filename, pixel_area)]) for every directory with jpgs.
     """
     results = []
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -103,8 +120,8 @@ def build_index(mask_path, output_file, num_threads, scan_dir=None):
                 continue
             path_key = os.sep.join(parts[:key_depth])
             object_class = osp.basename(dirpath_norm)
-            for filename in sorted(jpgs):
-                f.write(f'{path_key}\t{dirpath_norm}\t{filename}\t{object_class}\n')
+            for filename, area in sorted(jpgs, key=lambda x: x[0]):
+                f.write(f'{path_key}\t{dirpath_norm}\t{filename}\t{object_class}\t{area}\n')
                 count += 1
 
     print(f'Done. Wrote {count} entries to {output_file}')
