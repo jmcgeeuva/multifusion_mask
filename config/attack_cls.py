@@ -82,7 +82,7 @@ model = dict(
         drop_path_rate=0.2,
         patch_norm=True,
         out_indices=[1, 2, 3],
-        with_cp=False,
+        with_cp=True,
         convert_weights=False,
     ),
     img_neck=dict(

@@ -1,0 +1,1658 @@
+2026-06-19 10:13:13,637 - mmdet - INFO - Set random seed to 20969622, deterministic: False
+2026-06-19 10:13:13,919 - mmdet - INFO - Environment info:
+------------------------------------------------------------
+sys.platform: linux
+Python: 3.7.16 (default, Jan 17 2023, 22:20:44) [GCC 11.2.0]
+CUDA available: True
+GPU 0,1: NVIDIA GeForce RTX 3090
+CUDA_HOME: /home/tkg5kq/.conda/envs/ssiai_adv
+NVCC: Build cuda_11.7.r11.7/compiler.31294372_0
+GCC: gcc (GCC) 6.1.0
+PyTorch: 1.10.1
+PyTorch compiling details: PyTorch built with:
+  - GCC 7.3
+  - C++ Version: 201402
+  - Intel(R) Math Kernel Library Version 2020.0.2 Product Build 20200624 for Intel(R) 64 architecture applications
+  - Intel(R) MKL-DNN v2.2.3 (Git Hash 7336ca9f055cf1bfa13efb658fe15dc9b41f0740)
+  - OpenMP 201511 (a.k.a. OpenMP 4.5)
+  - LAPACK is enabled (usually provided by MKL)
+  - NNPACK is enabled
+  - CPU capability usage: AVX2
+  - CUDA Runtime 11.7
+  - Built with CUDA Runtime 11.3
+  - NVCC architecture flags: -gencode;arch=compute_37,code=sm_37;-gencode;arch=compute_50,code=sm_50;-gencode;arch=compute_60,code=sm_60;-gencode;arch=compute_61,code=sm_61;-gencode;arch=compute_70,code=sm_70;-gencode;arch=compute_75,code=sm_75;-gencode;arch=compute_80,code=sm_80;-gencode;arch=compute_86,code=sm_86;-gencode;arch=compute_37,code=compute_37
+  - CuDNN 8.2
+  - Magma 2.5.2
+  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, CUDA_VERSION=11.3, CUDNN_VERSION=8.2.0, CXX_COMPILER=/opt/rh/devtoolset-7/root/usr/bin/c++, CXX_FLAGS= -Wno-deprecated -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -fopenmp -DNDEBUG -DUSE_KINETO -DUSE_FBGEMM -DUSE_QNNPACK -DUSE_PYTORCH_QNNPACK -DUSE_XNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -DEDGE_PROFILER_USE_KINETO -O2 -fPIC -Wno-narrowing -Wall -Wextra -Werror=return-type -Wno-missing-field-initializers -Wno-type-limits -Wno-array-bounds -Wno-unknown-pragmas -Wno-sign-compare -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function -Wno-unused-result -Wno-unused-local-typedefs -Wno-strict-overflow -Wno-strict-aliasing -Wno-error=deprecated-declarations -Wno-stringop-overflow -Wno-psabi -Wno-error=pedantic -Wno-error=redundant-decls -Wno-error=old-style-cast -fdiagnostics-color=always -faligned-new -Wno-unused-but-set-variable -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, PERF_WITH_AVX512=1, TORCH_VERSION=1.10.1, USE_CUDA=ON, USE_CUDNN=ON, USE_EXCEPTION_PTR=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=ON, USE_NNPACK=ON, USE_OPENMP=ON, 
+
+TorchVision: 0.11.2
+OpenCV: 4.13.0
+MMCV: 1.4.0
+MMCV Compiler: GCC 7.3
+MMCV CUDA Compiler: 11.3
+MMDetection: 2.14.0
+MMSegmentation: 0.14.1
+MMDetection3D: 0.16.0+c41bea5
+------------------------------------------------------------
+
+2026-06-19 10:13:15,944 - mmdet - INFO - Distributed training: False
+2026-06-19 10:13:18,004 - mmdet - INFO - Config:
+class_names = [
+    'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
+    'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
+]
+checkpoint = './pretrained_models/IS-Fusion_epoch_10.pth'
+debug = False
+max_epochs = 1000
+camou_path = './workdir/20251111_215729/2camou.npy'
+freq = 0
+num_samples = 1
+allowed_words = './vehicle_words.txt'
+target_class = 'car'
+dynamic_ratio = False
+area_ratio = 0.002
+gamma_heatmap = 1
+gamma_cls = 0
+gamma_bbox = 0
+lr = 0.01
+color_map = [[0, 0, 0], [255, 255, 255], [0, 18, 79], [5, 80, 214],
+             [71, 178, 243], [178, 159, 211], [77, 58, 0], [211, 191, 167],
+             [247, 110, 26], [110, 76, 16]]
+lambda_reduce = 1
+lambda_smooth = 0
+lambda_nps = 0
+voxel_size = [0.075, 0.075, 0.2]
+point_cloud_range = [-54, -54, -5, 54, 54, 3]
+img_scale = (384, 1056)
+total_epochs = 10
+res_factor = 1
+out_size_factor = 8
+voxel_shape = 1440
+bev_size = 180
+grid_size = [[180, 180, 1], [90, 90, 1]]
+region_shape = [(6, 6, 1), (6, 6, 1)]
+region_drop_info = [
+    dict({0: dict(max_tokens=36, drop_range=(0, 100000))}),
+    dict({0: dict(max_tokens=36, drop_range=(0, 100000))})
+]
+model = dict(
+    type='ISFusionDetector',
+    detach=True,
+    pc_range=[-54, -54, -5, 54, 54, 3],
+    voxel_size=[0.075, 0.075, 0.2],
+    out_size_factor=8,
+    img_backbone=dict(
+        type='SwinTransformer',
+        embed_dims=96,
+        depths=[2, 2, 6, 2],
+        num_heads=[3, 6, 12, 24],
+        window_size=7,
+        mlp_ratio=4,
+        qkv_bias=True,
+        qk_scale=None,
+        drop_rate=0.0,
+        attn_drop_rate=0.0,
+        drop_path_rate=0.2,
+        patch_norm=True,
+        out_indices=[1, 2, 3],
+        with_cp=True,
+        convert_weights=False),
+    img_neck=dict(
+        type='GeneralizedLSSFPN',
+        in_channels=[192, 384, 768],
+        out_channels=256,
+        start_level=0,
+        num_outs=3),
+    pts_voxel_layer=dict(
+        point_cloud_range=[-54, -54, -5, 54, 54, 3],
+        max_num_points=-1,
+        voxel_size=[0.075, 0.075, 0.2],
+        max_voxels=(-1, -1)),
+    pts_voxel_encoder=dict(
+        type='DynamicVFE',
+        in_channels=5,
+        feat_channels=[64, 64],
+        with_distance=False,
+        voxel_size=[0.075, 0.075, 0.2],
+        with_cluster_center=True,
+        with_voxel_center=True,
+        point_cloud_range=[-54, -54, -5, 54, 54, 3],
+        norm_cfg=dict(type='naiveSyncBN1d', eps=0.001, momentum=0.01)),
+    pts_middle_encoder=dict(
+        type='SparseEncoder',
+        in_channels=64,
+        sparse_shape=[41, 1440, 1440],
+        base_channels=32,
+        output_channels=256,
+        order=('conv', 'norm', 'act'),
+        encoder_channels=((32, 32, 64), (64, 64, 128), (128, 128, 256), (256,
+                                                                         256)),
+        encoder_paddings=((0, 0, 1), (0, 0, 1), (0, 0, [0, 1, 1]), (0, 0)),
+        block_type='basicblock'),
+    fusion_encoder=dict(
+        type='ISFusionEncoder',
+        num_points_in_pillar=12,
+        embed_dims=256,
+        bev_size=180,
+        num_views=6,
+        region_shape=[(6, 6, 1), (6, 6, 1)],
+        grid_size=[[180, 180, 1], [90, 90, 1]],
+        region_drop_info=[
+            dict({0: dict(max_tokens=36, drop_range=(0, 100000))}),
+            dict({0: dict(max_tokens=36, drop_range=(0, 100000))})
+        ],
+        instance_num=200),
+    pts_backbone=dict(
+        type='SECONDV2',
+        in_channels=128,
+        out_channels=[128, 256],
+        layer_nums=[5, 5],
+        layer_strides=[1, 2],
+        norm_cfg=dict(type='BN', eps=0.001, momentum=0.01),
+        conv_cfg=dict(type='Conv2d', bias=False)),
+    pts_neck=dict(
+        type='SECONDFPN',
+        in_channels=[128, 256],
+        out_channels=[256, 256],
+        upsample_strides=[1, 2],
+        norm_cfg=dict(type='BN', eps=0.001, momentum=0.01),
+        upsample_cfg=dict(type='deconv', bias=False),
+        use_conv_for_no_stride=True),
+    pts_bbox_head=dict(
+        type='TransFusionHeadV2',
+        num_proposals=200,
+        auxiliary=True,
+        in_channels=512,
+        hidden_channel=128,
+        num_classes=10,
+        num_decoder_layers=1,
+        num_heads=8,
+        nms_kernel_size=3,
+        ffn_channel=256,
+        dropout=0.1,
+        bn_momentum=0.1,
+        activation='relu',
+        common_heads=dict(
+            center=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2), vel=(2, 2)),
+        bbox_coder=dict(
+            type='TransFusionBBoxCoder',
+            pc_range=[-54, -54],
+            voxel_size=[0.075, 0.075],
+            out_size_factor=8,
+            post_center_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
+            score_threshold=0.0,
+            code_size=10),
+        loss_cls=dict(
+            type='FocalLoss',
+            use_sigmoid=True,
+            gamma=2,
+            alpha=0.25,
+            reduction='mean',
+            loss_weight=1.0),
+        loss_bbox=dict(type='L1Loss', reduction='mean', loss_weight=0.25),
+        loss_heatmap=dict(
+            type='GaussianFocalLoss', reduction='mean', loss_weight=1.0)),
+    train_cfg=dict(
+        pts=dict(
+            dataset='nuScenes',
+            assigner=dict(
+                type='HungarianAssigner3D',
+                iou_calculator=dict(type='BboxOverlaps3D', coordinate='lidar'),
+                cls_cost=dict(
+                    type='FocalLossCost', gamma=2, alpha=0.25, weight=0.15),
+                reg_cost=dict(type='BBoxBEVL1Cost', weight=0.25),
+                iou_cost=dict(type='IoU3DCost', weight=0.25)),
+            pos_weight=-1,
+            gaussian_overlap=0.1,
+            min_radius=2,
+            grid_size=[1440, 1440, 40],
+            voxel_size=[0.075, 0.075, 0.2],
+            out_size_factor=8,
+            code_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2],
+            point_cloud_range=[-54, -54, -5, 54, 54, 3])),
+    test_cfg=dict(
+        pts=dict(
+            dataset='nuScenes',
+            grid_size=[1440, 1440, 40],
+            out_size_factor=8,
+            pc_range=[-54, -54],
+            voxel_size=[0.075, 0.075],
+            nms_type=None,
+            use_rotate_nms=True,
+            nms_thr=0.2,
+            max_num=200)))
+dataset_type = 'NuScenesDataset'
+data_root2 = './data/nuscenes/'
+data_root = './data/nuscenes/'
+input_modality = dict(
+    use_lidar=True,
+    use_camera=True,
+    use_radar=False,
+    use_map=False,
+    use_external=False)
+db_sampler = dict(
+    type='MMDataBaseSamplerV2',
+    data_root='./data/nuscenes/',
+    info_path='./data/nuscenes/nuscenes_dbinfos_train.pkl',
+    rate=1.0,
+    img_num=6,
+    blending_type=None,
+    depth_consistent=True,
+    check_2D_collision=True,
+    collision_thr=[0, 0.3, 0.5, 0.7],
+    mixup=0.7,
+    prepare=dict(
+        filter_by_difficulty=[-1],
+        filter_by_min_points=dict(
+            car=5,
+            truck=5,
+            bus=5,
+            trailer=5,
+            construction_vehicle=5,
+            traffic_cone=5,
+            barrier=5,
+            motorcycle=5,
+            bicycle=5,
+            pedestrian=5)),
+    classes=[
+        'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
+        'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
+    ],
+    sample_groups=dict(
+        car=2,
+        truck=3,
+        construction_vehicle=7,
+        bus=4,
+        trailer=6,
+        barrier=2,
+        motorcycle=6,
+        bicycle=6,
+        pedestrian=2,
+        traffic_cone=2),
+    points_loader=dict(
+        type='LoadPointsFromFile',
+        coord_type='LIDAR',
+        load_dim=5,
+        use_dim=[0, 1, 2, 3, 4]))
+train_pipeline = [
+    dict(
+        type='LoadMultiViewImageFromFilesV2_Camou',
+        to_float32=True,
+        mask_path='./data/nuscenes/nuscenes_masks'),
+    dict(
+        type='LoadPointsFromFile',
+        coord_type='LIDAR',
+        load_dim=5,
+        use_dim=5,
+        painting=False),
+    dict(
+        type='LoadPointsFromMultiSweeps',
+        sweeps_num=10,
+        use_dim=[0, 1, 2, 3, 4],
+        painting=False),
+    dict(
+        type='LoadAnnotations3D',
+        with_bbox_3d=True,
+        with_label_3d=True,
+        with_bbox=True,
+        with_label=True),
+    dict(
+        type='ObjectSampleV2',
+        stop_epoch=8,
+        db_sampler=dict(
+            type='MMDataBaseSamplerV2',
+            data_root='./data/nuscenes/',
+            info_path='./data/nuscenes/nuscenes_dbinfos_train.pkl',
+            rate=1.0,
+            img_num=6,
+            blending_type=None,
+            depth_consistent=True,
+            check_2D_collision=True,
+            collision_thr=[0, 0.3, 0.5, 0.7],
+            mixup=0.7,
+            prepare=dict(
+                filter_by_difficulty=[-1],
+                filter_by_min_points=dict(
+                    car=5,
+                    truck=5,
+                    bus=5,
+                    trailer=5,
+                    construction_vehicle=5,
+                    traffic_cone=5,
+                    barrier=5,
+                    motorcycle=5,
+                    bicycle=5,
+                    pedestrian=5)),
+            classes=[
+                'car', 'truck', 'construction_vehicle', 'bus', 'trailer',
+                'barrier', 'motorcycle', 'bicycle', 'pedestrian',
+                'traffic_cone'
+            ],
+            sample_groups=dict(
+                car=2,
+                truck=3,
+                construction_vehicle=7,
+                bus=4,
+                trailer=6,
+                barrier=2,
+                motorcycle=6,
+                bicycle=6,
+                pedestrian=2,
+                traffic_cone=2),
+            points_loader=dict(
+                type='LoadPointsFromFile',
+                coord_type='LIDAR',
+                load_dim=5,
+                use_dim=[0, 1, 2, 3, 4])),
+        sample_2d=True),
+    dict(type='ModalMask3D', mode='train', stop_epoch=8),
+    dict(
+        type='ImageAug3D_Camou',
+        final_dim=(384, 1056),
+        resize_lim=[0.57, 0.825],
+        bot_pct_lim=[0.0, 0.0],
+        rot_lim=[-5.4, 5.4],
+        rand_flip=True,
+        is_train=True),
+    dict(
+        type='GlobalRotScaleTransV2',
+        resize_lim=[0.9, 1.1],
+        rot_lim=[-0.78539816, 0.78539816],
+        trans_lim=0.5,
+        is_train=True),
+    dict(type='RandomFlip3DV2'),
+    dict(
+        type='PointsRangeFilter', point_cloud_range=[-54, -54, -5, 54, 54, 3]),
+    dict(
+        type='ObjectRangeFilter', point_cloud_range=[-54, -54, -5, 54, 54, 3]),
+    dict(
+        type='ObjectNameFilter',
+        classes=[
+            'car', 'truck', 'construction_vehicle', 'bus', 'trailer',
+            'barrier', 'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
+        ]),
+    dict(
+        type='ImageNormalize_Camou',
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225]),
+    dict(type='PointShuffle'),
+    dict(
+        type='DefaultFormatBundle3D',
+        class_names=[
+            'car', 'truck', 'construction_vehicle', 'bus', 'trailer',
+            'barrier', 'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
+        ]),
+    dict(
+        type='Collect3DV2',
+        keys=['points', 'img', 'masks', 'gt_bboxes_3d', 'gt_labels_3d'],
+        meta_keys=[
+            'camera_intrinsics', 'camera2ego', 'lidar2ego', 'lidar2camera',
+            'camera2lidar', 'lidar2img', 'img_aug_matrix', 'lidar_aug_matrix'
+        ])
+]
+test_pipeline = [
+    dict(
+        type='LoadPointsFromFile',
+        coord_type='LIDAR',
+        load_dim=5,
+        use_dim=5,
+        painting=False),
+    dict(
+        type='LoadPointsFromMultiSweeps',
+        sweeps_num=10,
+        use_dim=[0, 1, 2, 3, 4],
+        painting=False),
+    dict(
+        type='LoadMultiViewImageFromFilesV2_Camou',
+        to_float32=True,
+        mask_path='./data/nuscenes/nuscenes_masks'),
+    dict(
+        type='MultiScaleFlipAug3D',
+        img_scale=(384, 1056),
+        pts_scale_ratio=1.0,
+        flip=False,
+        pcd_horizontal_flip=False,
+        pcd_vertical_flip=False,
+        transforms=[
+            dict(
+                type='ImageAug3D_Camou',
+                final_dim=(384, 1056),
+                resize_lim=[0.72, 0.72],
+                bot_pct_lim=[0.0, 0.0],
+                rot_lim=[0.0, 0.0],
+                rand_flip=False,
+                is_train=False),
+            dict(
+                type='ImageNormalize_Camou',
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]),
+            dict(
+                type='GlobalRotScaleTransV2',
+                resize_lim=[1.0, 1.0],
+                rot_lim=[0.0, 0.0],
+                trans_lim=0.0,
+                is_train=False),
+            dict(type='RandomFlip3DV2'),
+            dict(
+                type='PointsRangeFilter',
+                point_cloud_range=[-54, -54, -5, 54, 54, 3]),
+            dict(
+                type='DefaultFormatBundle3D',
+                class_names=[
+                    'car', 'truck', 'construction_vehicle', 'bus', 'trailer',
+                    'barrier', 'motorcycle', 'bicycle', 'pedestrian',
+                    'traffic_cone'
+                ],
+                with_label=False),
+            dict(
+                type='Collect3DV2',
+                keys=['points', 'img', 'masks'],
+                meta_keys=[
+                    'camera_intrinsics', 'camera2ego', 'lidar2ego',
+                    'lidar2camera', 'camera2lidar', 'lidar2img',
+                    'img_aug_matrix', 'lidar_aug_matrix'
+                ])
+        ])
+]
+data = dict(
+    samples_per_gpu=2,
+    workers_per_gpu=2,
+    train=dict(
+        type='CBGSDataset',
+        dataset=dict(
+            type='NuScenesDataset',
+            data_root='./data/nuscenes/',
+            ann_file='./data/nuscenes/nuscenes_infos_train.pkl',
+            pipeline=[
+                dict(
+                    type='LoadMultiViewImageFromFilesV2_Camou',
+                    to_float32=True,
+                    mask_path='./data/nuscenes/nuscenes_masks'),
+                dict(
+                    type='LoadPointsFromFile',
+                    coord_type='LIDAR',
+                    load_dim=5,
+                    use_dim=5,
+                    painting=False),
+                dict(
+                    type='LoadPointsFromMultiSweeps',
+                    sweeps_num=10,
+                    use_dim=[0, 1, 2, 3, 4],
+                    painting=False),
+                dict(
+                    type='LoadAnnotations3D',
+                    with_bbox_3d=True,
+                    with_label_3d=True,
+                    with_bbox=True,
+                    with_label=True),
+                dict(
+                    type='ObjectSampleV2',
+                    stop_epoch=8,
+                    db_sampler=dict(
+                        type='MMDataBaseSamplerV2',
+                        data_root='./data/nuscenes/',
+                        info_path='./data/nuscenes/nuscenes_dbinfos_train.pkl',
+                        rate=1.0,
+                        img_num=6,
+                        blending_type=None,
+                        depth_consistent=True,
+                        check_2D_collision=True,
+                        collision_thr=[0, 0.3, 0.5, 0.7],
+                        mixup=0.7,
+                        prepare=dict(
+                            filter_by_difficulty=[-1],
+                            filter_by_min_points=dict(
+                                car=5,
+                                truck=5,
+                                bus=5,
+                                trailer=5,
+                                construction_vehicle=5,
+                                traffic_cone=5,
+                                barrier=5,
+                                motorcycle=5,
+                                bicycle=5,
+                                pedestrian=5)),
+                        classes=[
+                            'car', 'truck', 'construction_vehicle', 'bus',
+                            'trailer', 'barrier', 'motorcycle', 'bicycle',
+                            'pedestrian', 'traffic_cone'
+                        ],
+                        sample_groups=dict(
+                            car=2,
+                            truck=3,
+                            construction_vehicle=7,
+                            bus=4,
+                            trailer=6,
+                            barrier=2,
+                            motorcycle=6,
+                            bicycle=6,
+                            pedestrian=2,
+                            traffic_cone=2),
+                        points_loader=dict(
+                            type='LoadPointsFromFile',
+                            coord_type='LIDAR',
+                            load_dim=5,
+                            use_dim=[0, 1, 2, 3, 4])),
+                    sample_2d=True),
+                dict(type='ModalMask3D', mode='train', stop_epoch=8),
+                dict(
+                    type='ImageAug3D_Camou',
+                    final_dim=(384, 1056),
+                    resize_lim=[0.57, 0.825],
+                    bot_pct_lim=[0.0, 0.0],
+                    rot_lim=[-5.4, 5.4],
+                    rand_flip=True,
+                    is_train=True),
+                dict(
+                    type='GlobalRotScaleTransV2',
+                    resize_lim=[0.9, 1.1],
+                    rot_lim=[-0.78539816, 0.78539816],
+                    trans_lim=0.5,
+                    is_train=True),
+                dict(type='RandomFlip3DV2'),
+                dict(
+                    type='PointsRangeFilter',
+                    point_cloud_range=[-54, -54, -5, 54, 54, 3]),
+                dict(
+                    type='ObjectRangeFilter',
+                    point_cloud_range=[-54, -54, -5, 54, 54, 3]),
+                dict(
+                    type='ObjectNameFilter',
+                    classes=[
+                        'car', 'truck', 'construction_vehicle', 'bus',
+                        'trailer', 'barrier', 'motorcycle', 'bicycle',
+                        'pedestrian', 'traffic_cone'
+                    ]),
+                dict(
+                    type='ImageNormalize_Camou',
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]),
+                dict(type='PointShuffle'),
+                dict(
+                    type='DefaultFormatBundle3D',
+                    class_names=[
+                        'car', 'truck', 'construction_vehicle', 'bus',
+                        'trailer', 'barrier', 'motorcycle', 'bicycle',
+                        'pedestrian', 'traffic_cone'
+                    ]),
+                dict(
+                    type='Collect3DV2',
+                    keys=[
+                        'points', 'img', 'masks', 'gt_bboxes_3d',
+                        'gt_labels_3d'
+                    ],
+                    meta_keys=[
+                        'camera_intrinsics', 'camera2ego', 'lidar2ego',
+                        'lidar2camera', 'camera2lidar', 'lidar2img',
+                        'img_aug_matrix', 'lidar_aug_matrix'
+                    ])
+            ],
+            classes=[
+                'car', 'truck', 'construction_vehicle', 'bus', 'trailer',
+                'barrier', 'motorcycle', 'bicycle', 'pedestrian',
+                'traffic_cone'
+            ],
+            modality=dict(
+                use_lidar=True,
+                use_camera=True,
+                use_radar=False,
+                use_map=False,
+                use_external=False),
+            test_mode=False,
+            use_valid_flag=False,
+            box_type_3d='LiDAR',
+            img_num=6,
+            load_interval=1)),
+    val=dict(
+        type='NuScenesDataset',
+        data_root='./data/nuscenes/',
+        ann_file='./data/nuscenes/nuscenes_infos_val.pkl',
+        pipeline=[
+            dict(
+                type='LoadPointsFromFile',
+                coord_type='LIDAR',
+                load_dim=5,
+                use_dim=5,
+                painting=False),
+            dict(
+                type='LoadPointsFromMultiSweeps',
+                sweeps_num=10,
+                use_dim=[0, 1, 2, 3, 4],
+                painting=False),
+            dict(
+                type='LoadMultiViewImageFromFilesV2_Camou',
+                to_float32=True,
+                mask_path='./data/nuscenes/nuscenes_masks'),
+            dict(
+                type='MultiScaleFlipAug3D',
+                img_scale=(384, 1056),
+                pts_scale_ratio=1.0,
+                flip=False,
+                pcd_horizontal_flip=False,
+                pcd_vertical_flip=False,
+                transforms=[
+                    dict(
+                        type='ImageAug3D_Camou',
+                        final_dim=(384, 1056),
+                        resize_lim=[0.72, 0.72],
+                        bot_pct_lim=[0.0, 0.0],
+                        rot_lim=[0.0, 0.0],
+                        rand_flip=False,
+                        is_train=False),
+                    dict(
+                        type='ImageNormalize_Camou',
+                        mean=[0.485, 0.456, 0.406],
+                        std=[0.229, 0.224, 0.225]),
+                    dict(
+                        type='GlobalRotScaleTransV2',
+                        resize_lim=[1.0, 1.0],
+                        rot_lim=[0.0, 0.0],
+                        trans_lim=0.0,
+                        is_train=False),
+                    dict(type='RandomFlip3DV2'),
+                    dict(
+                        type='PointsRangeFilter',
+                        point_cloud_range=[-54, -54, -5, 54, 54, 3]),
+                    dict(
+                        type='DefaultFormatBundle3D',
+                        class_names=[
+                            'car', 'truck', 'construction_vehicle', 'bus',
+                            'trailer', 'barrier', 'motorcycle', 'bicycle',
+                            'pedestrian', 'traffic_cone'
+                        ],
+                        with_label=False),
+                    dict(
+                        type='Collect3DV2',
+                        keys=['points', 'img', 'masks'],
+                        meta_keys=[
+                            'camera_intrinsics', 'camera2ego', 'lidar2ego',
+                            'lidar2camera', 'camera2lidar', 'lidar2img',
+                            'img_aug_matrix', 'lidar_aug_matrix'
+                        ])
+                ])
+        ],
+        classes=[
+            'car', 'truck', 'construction_vehicle', 'bus', 'trailer',
+            'barrier', 'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
+        ],
+        modality=dict(
+            use_lidar=True,
+            use_camera=True,
+            use_radar=False,
+            use_map=False,
+            use_external=False),
+        test_mode=True,
+        img_num=6,
+        box_type_3d='LiDAR'),
+    test=dict(
+        type='NuScenesDataset',
+        data_root='./data/nuscenes/',
+        ann_file='./data/nuscenes/nuscenes_infos_val.pkl',
+        pipeline=[
+            dict(
+                type='LoadPointsFromFile',
+                coord_type='LIDAR',
+                load_dim=5,
+                use_dim=5,
+                painting=False),
+            dict(
+                type='LoadPointsFromMultiSweeps',
+                sweeps_num=10,
+                use_dim=[0, 1, 2, 3, 4],
+                painting=False),
+            dict(
+                type='LoadMultiViewImageFromFilesV2_Camou',
+                to_float32=True,
+                mask_path='./data/nuscenes/nuscenes_masks'),
+            dict(
+                type='MultiScaleFlipAug3D',
+                img_scale=(384, 1056),
+                pts_scale_ratio=1.0,
+                flip=False,
+                pcd_horizontal_flip=False,
+                pcd_vertical_flip=False,
+                transforms=[
+                    dict(
+                        type='ImageAug3D_Camou',
+                        final_dim=(384, 1056),
+                        resize_lim=[0.72, 0.72],
+                        bot_pct_lim=[0.0, 0.0],
+                        rot_lim=[0.0, 0.0],
+                        rand_flip=False,
+                        is_train=False),
+                    dict(
+                        type='ImageNormalize_Camou',
+                        mean=[0.485, 0.456, 0.406],
+                        std=[0.229, 0.224, 0.225]),
+                    dict(
+                        type='GlobalRotScaleTransV2',
+                        resize_lim=[1.0, 1.0],
+                        rot_lim=[0.0, 0.0],
+                        trans_lim=0.0,
+                        is_train=False),
+                    dict(type='RandomFlip3DV2'),
+                    dict(
+                        type='PointsRangeFilter',
+                        point_cloud_range=[-54, -54, -5, 54, 54, 3]),
+                    dict(
+                        type='DefaultFormatBundle3D',
+                        class_names=[
+                            'car', 'truck', 'construction_vehicle', 'bus',
+                            'trailer', 'barrier', 'motorcycle', 'bicycle',
+                            'pedestrian', 'traffic_cone'
+                        ],
+                        with_label=False),
+                    dict(
+                        type='Collect3DV2',
+                        keys=['points', 'img', 'masks'],
+                        meta_keys=[
+                            'camera_intrinsics', 'camera2ego', 'lidar2ego',
+                            'lidar2camera', 'camera2lidar', 'lidar2img',
+                            'img_aug_matrix', 'lidar_aug_matrix'
+                        ])
+                ])
+        ],
+        classes=[
+            'car', 'truck', 'construction_vehicle', 'bus', 'trailer',
+            'barrier', 'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
+        ],
+        modality=dict(
+            use_lidar=True,
+            use_camera=True,
+            use_radar=False,
+            use_map=False,
+            use_external=False),
+        test_mode=True,
+        img_num=6,
+        box_type_3d='LiDAR'))
+optimizer = dict(
+    type='AdamW',
+    lr=0.0001,
+    weight_decay=0.01,
+    paramwise_cfg=dict(custom_keys=dict(img_backbone=dict(lr_mult=0.1))))
+optimizer_config = dict(grad_clip=dict(max_norm=0.01, norm_type=2))
+lr_config = dict(
+    policy='cyclic',
+    target_ratio=(10, 0.0001),
+    cyclic_times=1,
+    step_ratio_up=0.4)
+momentum_config = dict(
+    policy='cyclic',
+    target_ratio=(0.8947368421052632, 1),
+    cyclic_times=1,
+    step_ratio_up=0.4)
+custom_hooks = [dict(type='EmptyCacheHook', after_iter=True, priority='HIGH')]
+runner = dict(type='CustomEpochBasedRunner', max_epochs=10)
+evaluation = dict(interval=5)
+checkpoint_config = dict(interval=1)
+log_config = dict(
+    interval=50,
+    hooks=[dict(type='TextLoggerHook'),
+           dict(type='TensorboardLoggerHook')])
+dist_params = dict(backend='nccl')
+log_level = 'INFO'
+work_dir = './work_dirs/only_vehicles'
+load_from = './pretrain_models/swint-nuimages-pretrained-e2e.pth'
+resume_from = None
+workflow = [('train', 1)]
+gpu_ids = range(0, 1)
+find_unused_parameters = True
+distributed = False
+seed = 65040783
+
+2026-06-19 10:13:59,535 - mmdet - INFO - Model:
+ISFusionDetector(
+  (pts_voxel_layer): Voxelization(voxel_size=[0.075, 0.075, 0.2], point_cloud_range=[-54, -54, -5, 54, 54, 3], max_num_points=-1, max_voxels=(-1, -1), deterministic=True)
+  (pts_voxel_encoder): DynamicVFE(
+    (scatter): DynamicScatter(voxel_size=[0.075, 0.075, 0.2], point_cloud_range=[-54, -54, -5, 54, 54, 3], average_points=True)
+    (vfe_layers): ModuleList(
+      (0): DynamicVFELayer(
+        (norm): NaiveSyncBatchNorm1d(64, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (linear): Linear(in_features=11, out_features=64, bias=False)
+      )
+      (1): DynamicVFELayer(
+        (norm): NaiveSyncBatchNorm1d(64, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (linear): Linear(in_features=128, out_features=64, bias=False)
+      )
+    )
+    (vfe_scatter): DynamicScatter(voxel_size=[0.075, 0.075, 0.2], point_cloud_range=[-54, -54, -5, 54, 54, 3], average_points=False)
+    (vfe_scatter_img): DynamicScatter(voxel_size=[0.075, 0.075, 0.2], point_cloud_range=[-54, -54, -5, 54, 54, 3], average_points=False)
+    (cluster_scatter): DynamicScatter(voxel_size=[0.075, 0.075, 0.2], point_cloud_range=[-54, -54, -5, 54, 54, 3], average_points=True)
+  )
+  (pts_middle_encoder): SparseEncoder(
+    (conv_input): SparseSequential(
+      (0): SubMConv3d(64, 32, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+      (1): BatchNorm1d(32, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+      (2): ReLU(inplace=True)
+    )
+    (encoder_layers): SparseSequential(
+      (encoder_layer1): SparseSequential(
+        (0): SparseBasicBlock(
+          (conv1): SubMConv3d(32, 32, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn1): BatchNorm1d(32, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (conv2): SubMConv3d(32, 32, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn2): BatchNorm1d(32, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (relu): ReLU(inplace=True)
+        )
+        (1): SparseBasicBlock(
+          (conv1): SubMConv3d(32, 32, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn1): BatchNorm1d(32, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (conv2): SubMConv3d(32, 32, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn2): BatchNorm1d(32, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (relu): ReLU(inplace=True)
+        )
+        (2): SparseSequential(
+          (0): SparseConv3d(32, 64, kernel_size=[3, 3, 3], stride=[2, 2, 2], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (1): BatchNorm1d(64, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (2): ReLU(inplace=True)
+        )
+      )
+      (encoder_layer2): SparseSequential(
+        (0): SparseBasicBlock(
+          (conv1): SubMConv3d(64, 64, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn1): BatchNorm1d(64, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (conv2): SubMConv3d(64, 64, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn2): BatchNorm1d(64, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (relu): ReLU(inplace=True)
+        )
+        (1): SparseBasicBlock(
+          (conv1): SubMConv3d(64, 64, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn1): BatchNorm1d(64, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (conv2): SubMConv3d(64, 64, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn2): BatchNorm1d(64, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (relu): ReLU(inplace=True)
+        )
+        (2): SparseSequential(
+          (0): SparseConv3d(64, 128, kernel_size=[3, 3, 3], stride=[2, 2, 2], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (1): BatchNorm1d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (2): ReLU(inplace=True)
+        )
+      )
+      (encoder_layer3): SparseSequential(
+        (0): SparseBasicBlock(
+          (conv1): SubMConv3d(128, 128, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn1): BatchNorm1d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (conv2): SubMConv3d(128, 128, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn2): BatchNorm1d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (relu): ReLU(inplace=True)
+        )
+        (1): SparseBasicBlock(
+          (conv1): SubMConv3d(128, 128, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn1): BatchNorm1d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (conv2): SubMConv3d(128, 128, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn2): BatchNorm1d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (relu): ReLU(inplace=True)
+        )
+        (2): SparseSequential(
+          (0): SparseConv3d(128, 256, kernel_size=[3, 3, 3], stride=[2, 2, 2], padding=[0, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (1): BatchNorm1d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (2): ReLU(inplace=True)
+        )
+      )
+      (encoder_layer4): SparseSequential(
+        (0): SparseBasicBlock(
+          (conv1): SubMConv3d(256, 256, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn1): BatchNorm1d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (conv2): SubMConv3d(256, 256, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn2): BatchNorm1d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (relu): ReLU(inplace=True)
+        )
+        (1): SparseBasicBlock(
+          (conv1): SubMConv3d(256, 256, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn1): BatchNorm1d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (conv2): SubMConv3d(256, 256, kernel_size=[3, 3, 3], stride=[1, 1, 1], padding=[1, 1, 1], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+          (bn2): BatchNorm1d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+          (relu): ReLU(inplace=True)
+        )
+      )
+    )
+    (conv_out): SparseSequential(
+      (0): SparseConv3d(256, 256, kernel_size=[3, 1, 1], stride=[2, 1, 1], padding=[0, 0, 0], dilation=[1, 1, 1], output_padding=[0, 0, 0], bias=False, algo=ConvAlgo.MaskImplicitGemm)
+      (1): BatchNorm1d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+      (2): ReLU(inplace=True)
+    )
+  )
+  (pts_backbone): SECONDV2(
+    (ds_layer): Sequential(
+      (0): Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+      (1): BatchNorm2d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+      (2): ReLU(inplace=True)
+    )
+    (blocks): ModuleList(
+      (0): Sequential(
+        (0): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (1): BatchNorm2d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (2): ReLU(inplace=True)
+        (3): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (4): BatchNorm2d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (5): ReLU(inplace=True)
+        (6): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (7): BatchNorm2d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (8): ReLU(inplace=True)
+        (9): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (10): BatchNorm2d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (11): ReLU(inplace=True)
+        (12): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (13): BatchNorm2d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (14): ReLU(inplace=True)
+        (15): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (16): BatchNorm2d(128, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (17): ReLU(inplace=True)
+      )
+      (1): Sequential(
+        (0): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (1): BatchNorm2d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (2): ReLU(inplace=True)
+        (3): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (4): BatchNorm2d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (5): ReLU(inplace=True)
+        (6): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (7): BatchNorm2d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (8): ReLU(inplace=True)
+        (9): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (10): BatchNorm2d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (11): ReLU(inplace=True)
+        (12): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (13): BatchNorm2d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (14): ReLU(inplace=True)
+      )
+    )
+  )
+  init_cfg={'type': 'Kaiming', 'layer': 'Conv2d'}
+  (pts_neck): SECONDFPN(
+    (deblocks): ModuleList(
+      (0): Sequential(
+        (0): Conv2d(128, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+        (1): BatchNorm2d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (2): ReLU(inplace=True)
+      )
+      (1): Sequential(
+        (0): ConvTranspose2d(256, 256, kernel_size=(2, 2), stride=(2, 2), bias=False)
+        (1): BatchNorm2d(256, eps=0.001, momentum=0.01, affine=True, track_running_stats=True)
+        (2): ReLU(inplace=True)
+      )
+    )
+  )
+  init_cfg=[{'type': 'Kaiming', 'layer': 'ConvTranspose2d'}, {'type': 'Constant', 'layer': 'NaiveSyncBatchNorm2d', 'val': 1.0}]
+  (pts_bbox_head): TransFusionHeadV2(
+    (loss_cls): FocalLoss()
+    (loss_bbox): L1Loss()
+    (loss_iou): VarifocalLoss()
+    (loss_heatmap): GaussianFocalLoss()
+    (loss_heatmap_ins): GaussianFocalLoss()
+    (shared_conv): Conv2d(512, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (heatmap_head): Sequential(
+      (0): ConvModule(
+        (conv): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (bn): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (activate): ReLU(inplace=True)
+      )
+      (1): Conv2d(128, 10, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    )
+    (class_encoding): Conv1d(10, 128, kernel_size=(1,), stride=(1,))
+    (decoder): ModuleList(
+      (0): TransformerDecoderLayer(
+        (self_attn): MultiheadAttention(
+          (out_proj): Linear(in_features=128, out_features=128, bias=True)
+        )
+        (multihead_attn): MultiheadAttention(
+          (out_proj): Linear(in_features=128, out_features=128, bias=True)
+        )
+        (linear1): Linear(in_features=128, out_features=256, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+        (linear2): Linear(in_features=256, out_features=128, bias=True)
+        (norm1): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+        (norm2): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+        (norm3): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+        (dropout1): Dropout(p=0.1, inplace=False)
+        (dropout2): Dropout(p=0.1, inplace=False)
+        (dropout3): Dropout(p=0.1, inplace=False)
+        (self_posembed): PositionEmbeddingLearned(
+          (position_embedding_head): Sequential(
+            (0): Conv1d(2, 128, kernel_size=(1,), stride=(1,))
+            (1): BatchNorm1d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (2): ReLU(inplace=True)
+            (3): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          )
+        )
+        (cross_posembed): PositionEmbeddingLearned(
+          (position_embedding_head): Sequential(
+            (0): Conv1d(2, 128, kernel_size=(1,), stride=(1,))
+            (1): BatchNorm1d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (2): ReLU(inplace=True)
+            (3): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+          )
+        )
+      )
+    )
+    (prediction_heads): ModuleList(
+      (0): FFN(
+        (center): Sequential(
+          (0): ConvModule(
+            (conv): Conv1d(128, 64, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (activate): ReLU(inplace=True)
+          )
+          (1): Conv1d(64, 2, kernel_size=(1,), stride=(1,))
+        )
+        (height): Sequential(
+          (0): ConvModule(
+            (conv): Conv1d(128, 64, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (activate): ReLU(inplace=True)
+          )
+          (1): Conv1d(64, 1, kernel_size=(1,), stride=(1,))
+        )
+        (dim): Sequential(
+          (0): ConvModule(
+            (conv): Conv1d(128, 64, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (activate): ReLU(inplace=True)
+          )
+          (1): Conv1d(64, 3, kernel_size=(1,), stride=(1,))
+        )
+        (rot): Sequential(
+          (0): ConvModule(
+            (conv): Conv1d(128, 64, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (activate): ReLU(inplace=True)
+          )
+          (1): Conv1d(64, 2, kernel_size=(1,), stride=(1,))
+        )
+        (vel): Sequential(
+          (0): ConvModule(
+            (conv): Conv1d(128, 64, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (activate): ReLU(inplace=True)
+          )
+          (1): Conv1d(64, 2, kernel_size=(1,), stride=(1,))
+        )
+        (heatmap): Sequential(
+          (0): ConvModule(
+            (conv): Conv1d(128, 64, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (activate): ReLU(inplace=True)
+          )
+          (1): Conv1d(64, 10, kernel_size=(1,), stride=(1,))
+        )
+      )
+    )
+  )
+  (img_backbone): SwinTransformer(
+    (patch_embed): PatchEmbed(
+      (adap_padding): AdaptivePadding()
+      (projection): Conv2d(3, 96, kernel_size=(4, 4), stride=(4, 4))
+      (norm): LayerNorm((96,), eps=1e-05, elementwise_affine=True)
+    )
+    (drop_after_pos): Dropout(p=0.0, inplace=False)
+    (stages): ModuleList(
+      (0): SwinBlockSequence(
+        (blocks): ModuleList(
+          (0): SwinBlock(
+            (norm1): LayerNorm((96,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=96, out_features=288, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=96, out_features=96, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((96,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=96, out_features=384, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=384, out_features=96, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+          (1): SwinBlock(
+            (norm1): LayerNorm((96,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=96, out_features=288, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=96, out_features=96, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((96,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=96, out_features=384, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=384, out_features=96, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+        )
+        (downsample): PatchMerging(
+          (adap_padding): AdaptivePadding()
+          (sampler): Unfold(kernel_size=(2, 2), dilation=(1, 1), padding=(0, 0), stride=(2, 2))
+          (norm): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+          (reduction): Linear(in_features=384, out_features=192, bias=False)
+        )
+      )
+      (1): SwinBlockSequence(
+        (blocks): ModuleList(
+          (0): SwinBlock(
+            (norm1): LayerNorm((192,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=192, out_features=576, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=192, out_features=192, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((192,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=192, out_features=768, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=768, out_features=192, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+          (1): SwinBlock(
+            (norm1): LayerNorm((192,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=192, out_features=576, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=192, out_features=192, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((192,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=192, out_features=768, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=768, out_features=192, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+        )
+        (downsample): PatchMerging(
+          (adap_padding): AdaptivePadding()
+          (sampler): Unfold(kernel_size=(2, 2), dilation=(1, 1), padding=(0, 0), stride=(2, 2))
+          (norm): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+          (reduction): Linear(in_features=768, out_features=384, bias=False)
+        )
+      )
+      (2): SwinBlockSequence(
+        (blocks): ModuleList(
+          (0): SwinBlock(
+            (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=384, out_features=1152, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=384, out_features=384, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=384, out_features=1536, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=1536, out_features=384, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+          (1): SwinBlock(
+            (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=384, out_features=1152, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=384, out_features=384, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=384, out_features=1536, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=1536, out_features=384, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+          (2): SwinBlock(
+            (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=384, out_features=1152, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=384, out_features=384, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=384, out_features=1536, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=1536, out_features=384, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+          (3): SwinBlock(
+            (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=384, out_features=1152, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=384, out_features=384, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=384, out_features=1536, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=1536, out_features=384, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+          (4): SwinBlock(
+            (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=384, out_features=1152, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=384, out_features=384, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=384, out_features=1536, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=1536, out_features=384, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+          (5): SwinBlock(
+            (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=384, out_features=1152, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=384, out_features=384, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=384, out_features=1536, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=1536, out_features=384, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+        )
+        (downsample): PatchMerging(
+          (adap_padding): AdaptivePadding()
+          (sampler): Unfold(kernel_size=(2, 2), dilation=(1, 1), padding=(0, 0), stride=(2, 2))
+          (norm): LayerNorm((1536,), eps=1e-05, elementwise_affine=True)
+          (reduction): Linear(in_features=1536, out_features=768, bias=False)
+        )
+      )
+      (3): SwinBlockSequence(
+        (blocks): ModuleList(
+          (0): SwinBlock(
+            (norm1): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=768, out_features=2304, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=768, out_features=768, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=768, out_features=3072, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=3072, out_features=768, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+          (1): SwinBlock(
+            (norm1): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+            (attn): ShiftWindowMSA(
+              (w_msa): WindowMSA(
+                (qkv): Linear(in_features=768, out_features=2304, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=768, out_features=768, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop): DropPath()
+            )
+            (norm2): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+            (ffn): FFN(
+              (activate): GELU()
+              (layers): Sequential(
+                (0): Sequential(
+                  (0): Linear(in_features=768, out_features=3072, bias=True)
+                  (1): GELU()
+                  (2): Dropout(p=0.0, inplace=False)
+                )
+                (1): Linear(in_features=3072, out_features=768, bias=True)
+                (2): Dropout(p=0.0, inplace=False)
+              )
+              (dropout_layer): DropPath()
+            )
+          )
+        )
+      )
+    )
+    (norm1): LayerNorm((192,), eps=1e-05, elementwise_affine=True)
+    (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+    (norm3): LayerNorm((768,), eps=1e-05, elementwise_affine=True)
+  )
+  (img_neck): GeneralizedLSSFPN(
+    (lateral_convs): ModuleList(
+      (0): ConvModule(
+        (conv): Conv2d(448, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+        (bn): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (activate): ReLU()
+      )
+      (1): ConvModule(
+        (conv): Conv2d(1152, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+        (bn): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (activate): ReLU()
+      )
+    )
+    (fpn_convs): ModuleList(
+      (0): ConvModule(
+        (conv): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (bn): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (activate): ReLU()
+      )
+      (1): ConvModule(
+        (conv): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        (bn): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (activate): ReLU()
+      )
+    )
+  )
+  (fusion_encoder): ISFusionEncoder(
+    (conv_fusion): ConvModule(
+      (conv): Conv2d(768, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (activate): ReLU(inplace=True)
+    )
+    (get_regions): ModuleList(
+      (0): SSTInputLayerV2()
+      (1): SSTInputLayerV2()
+    )
+    (grid2region_att): ModuleList(
+      (0): SSTv2(
+        (linear0): Linear(in_features=128, out_features=128, bias=True)
+        (block_list): ModuleList(
+          (0): BasicShiftBlockV2(
+            (encoder_list): ModuleList(
+              (0): EncoderLayer(
+                (win_attn): WindowAttention(
+                  (self_attn): MultiheadAttention(
+                    (out_proj): NonDynamicallyQuantizableLinear(in_features=128, out_features=128, bias=True)
+                  )
+                )
+                (linear1): Linear(in_features=128, out_features=128, bias=True)
+                (dropout): Dropout(p=0, inplace=False)
+                (linear2): Linear(in_features=128, out_features=128, bias=True)
+                (norm1): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+                (norm2): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+                (dropout1): Dropout(p=0, inplace=False)
+                (dropout2): Dropout(p=0, inplace=False)
+              )
+              (1): EncoderLayer(
+                (win_attn): WindowAttention(
+                  (self_attn): MultiheadAttention(
+                    (out_proj): NonDynamicallyQuantizableLinear(in_features=128, out_features=128, bias=True)
+                  )
+                )
+                (linear1): Linear(in_features=128, out_features=128, bias=True)
+                (dropout): Dropout(p=0, inplace=False)
+                (linear2): Linear(in_features=128, out_features=128, bias=True)
+                (norm1): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+                (norm2): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+                (dropout1): Dropout(p=0, inplace=False)
+                (dropout2): Dropout(p=0, inplace=False)
+              )
+            )
+          )
+        )
+      )
+      (1): SSTv2(
+        (block_list): ModuleList(
+          (0): BasicShiftBlockV2(
+            (encoder_list): ModuleList(
+              (0): EncoderLayer(
+                (win_attn): WindowAttention(
+                  (self_attn): MultiheadAttention(
+                    (out_proj): NonDynamicallyQuantizableLinear(in_features=256, out_features=256, bias=True)
+                  )
+                )
+                (linear1): Linear(in_features=256, out_features=256, bias=True)
+                (dropout): Dropout(p=0, inplace=False)
+                (linear2): Linear(in_features=256, out_features=256, bias=True)
+                (norm1): LayerNorm((256,), eps=1e-05, elementwise_affine=True)
+                (norm2): LayerNorm((256,), eps=1e-05, elementwise_affine=True)
+                (dropout1): Dropout(p=0, inplace=False)
+                (dropout2): Dropout(p=0, inplace=False)
+              )
+              (1): EncoderLayer(
+                (win_attn): WindowAttention(
+                  (self_attn): MultiheadAttention(
+                    (out_proj): NonDynamicallyQuantizableLinear(in_features=256, out_features=256, bias=True)
+                  )
+                )
+                (linear1): Linear(in_features=256, out_features=256, bias=True)
+                (dropout): Dropout(p=0, inplace=False)
+                (linear2): Linear(in_features=256, out_features=256, bias=True)
+                (norm1): LayerNorm((256,), eps=1e-05, elementwise_affine=True)
+                (norm2): LayerNorm((256,), eps=1e-05, elementwise_affine=True)
+                (dropout1): Dropout(p=0, inplace=False)
+                (dropout2): Dropout(p=0, inplace=False)
+              )
+            )
+          )
+        )
+      )
+    )
+    (conv_ins): ConvModule(
+      (conv): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (activate): ReLU(inplace=True)
+    )
+    (conv_scene): ConvModule(
+      (conv): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (activate): ReLU(inplace=True)
+    )
+    (conv_heatmap): ConvModule(
+      (conv): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (activate): ReLU(inplace=True)
+    )
+    (heatmap_head_1): ConvModule(
+      (conv): Conv2d(128, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (activate): ReLU(inplace=True)
+    )
+    (heatmap_head_2): ConvModule(
+      (conv): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (activate): ReLU(inplace=True)
+    )
+    (heatmap_head_3): Conv2d(64, 10, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (instance_att): InsContextAtt(
+      (layers): ModuleList(
+        (0): DeformableTransformerDecoderLayer(
+          (cross_attn): MSDeformAttn(
+            (sampling_offsets): Linear(in_features=128, out_features=256, bias=True)
+            (attention_weights): Linear(in_features=128, out_features=128, bias=True)
+            (value_proj): Linear(in_features=128, out_features=128, bias=True)
+            (output_proj): Linear(in_features=128, out_features=128, bias=True)
+          )
+          (dropout1): Dropout(p=0.1, inplace=False)
+          (norm1): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+          (self_attn): MultiheadAttention(
+            (out_proj): NonDynamicallyQuantizableLinear(in_features=128, out_features=128, bias=True)
+          )
+          (dropout2): Dropout(p=0.1, inplace=False)
+          (norm2): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+          (linear1): Linear(in_features=128, out_features=128, bias=True)
+          (dropout3): Dropout(p=0.1, inplace=False)
+          (linear2): Linear(in_features=128, out_features=128, bias=True)
+          (dropout4): Dropout(p=0.1, inplace=False)
+          (norm3): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+        )
+        (1): DeformableTransformerDecoderLayer(
+          (cross_attn): MSDeformAttn(
+            (sampling_offsets): Linear(in_features=128, out_features=256, bias=True)
+            (attention_weights): Linear(in_features=128, out_features=128, bias=True)
+            (value_proj): Linear(in_features=128, out_features=128, bias=True)
+            (output_proj): Linear(in_features=128, out_features=128, bias=True)
+          )
+          (dropout1): Dropout(p=0.1, inplace=False)
+          (norm1): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+          (self_attn): MultiheadAttention(
+            (out_proj): NonDynamicallyQuantizableLinear(in_features=128, out_features=128, bias=True)
+          )
+          (dropout2): Dropout(p=0.1, inplace=False)
+          (norm2): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+          (linear1): Linear(in_features=128, out_features=128, bias=True)
+          (dropout3): Dropout(p=0.1, inplace=False)
+          (linear2): Linear(in_features=128, out_features=128, bias=True)
+          (dropout4): Dropout(p=0.1, inplace=False)
+          (norm3): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+        )
+      )
+      (query_pos_embed): PositionEmbeddingLearned(
+        (position_embedding_head): Sequential(
+          (0): Conv1d(2, 128, kernel_size=(1,), stride=(1,))
+          (1): BatchNorm1d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+          (2): ReLU(inplace=True)
+          (3): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+      (key_pos_embed): PositionEmbeddingLearned(
+        (position_embedding_head): Sequential(
+          (0): Conv1d(2, 128, kernel_size=(1,), stride=(1,))
+          (1): BatchNorm1d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+          (2): ReLU(inplace=True)
+          (3): Conv1d(128, 128, kernel_size=(1,), stride=(1,))
+        )
+      )
+    )
+    (instance_to_scene_att): Instane2SceneAtt(
+      (multihead_attn): MultiheadAttention(
+        (out_proj): Linear(in_features=128, out_features=128, bias=True)
+      )
+      (norm): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+      (dropout): Dropout(p=0.1, inplace=False)
+    )
+  )
+  (pts_pillar_layer): Voxelization(voxel_size=[0.6, 0.6, 8], point_cloud_range=[-54, -54, -5, 54, 54, 3], max_num_points=12, max_voxels=(30000, 60000), deterministic=True)
+)

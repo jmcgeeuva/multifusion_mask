@@ -83,7 +83,7 @@ model = dict(
         drop_path_rate=0.2,
         patch_norm=True,
         out_indices=[1, 2, 3],
-        with_cp=False,
+        with_cp=True,
         convert_weights=False,
     ),
     img_neck=dict(
@@ -276,7 +276,7 @@ db_sampler = dict(
 )
 
 train_pipeline = [
-    dict(type='LoadMultiViewImageFromFilesV2_Camou', to_float32=True, mask_path='./data/nuscenes/nuscenes_masks'),
+    dict(type='LoadMultiViewImageFromFilesV2_Camou', to_float32=True, mask_path='./data/nuscenes/nuscenes_masks', index_file='./nuscenes_masks_index.txt'),
     dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
@@ -348,7 +348,7 @@ test_pipeline = [
         use_dim=[0, 1, 2, 3, 4],
         painting=False,
     ),
-    dict(type='LoadMultiViewImageFromFilesV2_Camou', to_float32=True, mask_path='./data/nuscenes/nuscenes_masks'),
+    dict(type='LoadMultiViewImageFromFilesV2_Camou', to_float32=True, mask_path='./data/nuscenes/nuscenes_masks', index_file='./nuscenes_masks_index.txt'),
     # dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_bbox=True, with_label=True),
 
     dict(
@@ -393,7 +393,7 @@ test_pipeline = [
 ]
 
 data = dict(
-    samples_per_gpu=2,
+    samples_per_gpu=1,
     workers_per_gpu=2,
     train=dict(
         type='CBGSDataset',

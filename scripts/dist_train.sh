@@ -7,6 +7,7 @@ else
 fi
 
 export PYTHONPATH=$PYTHONPATH:$(pwd)/IS-Fusion
+export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
 
 CONFIG=$1
 GPUS=$2

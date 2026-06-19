@@ -264,6 +264,37 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
     time.sleep(2)  # This line can prevent deadlock problem in some cases.
     debug=False
 
+    # Determine the device the model is on so we can move data there.
+    _underlying = model.module if hasattr(model, 'module') else model
+    _device = next(_underlying.parameters()).device
+
+    def _dc_to_device(val, device):
+        """Move a DataContainer's inner tensors to device, in-place."""
+        if hasattr(val, '_data') and isinstance(val._data, list) and val._data:
+            inner = val._data[0]
+            if isinstance(inner, torch.Tensor):
+                val._data[0] = inner.to(device)
+            elif isinstance(inner, list):
+                val._data[0] = [x.to(device) if isinstance(x, torch.Tensor) else x
+                                 for x in inner]
+        return val
+
+    # When running the no-attack baseline, use MMDataParallel so inference is
+    # spread across all GPUs.  The attack path stays on one GPU because the
+    # camouflage tensor lives on _device and must propagate gradients there.
+    _num_gpus = torch.cuda.device_count()
+    _use_dp = (
+        no_attack
+        and _num_gpus > 1
+        and world_size == 1
+        and not isinstance(model, (MMDataParallel, MMDistributedDataParallel))
+    )
+    if _use_dp:
+        eval_model = MMDataParallel(_underlying, device_ids=list(range(_num_gpus)))
+        eval_model.eval()
+    else:
+        eval_model = model
+
     # DistributedSampler with shuffle=False is deterministic; iterate once to
     # get the exact dataset-index for each position in the loader.
     sampler_indices = list(iter(data_loader.sampler))
@@ -274,9 +305,9 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
             if not no_attack:
                 camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
 
-                imgs = data['img'][0].data[0]
-                mask_img = data['masks'][0].data[0]
-                learned_img, attack_meta = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=imgs.device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=cfg.num_samples, debug=cfg.debug, target_class=getattr(cfg, 'target_class', None))
+                imgs = data['img'][0].data[0].to(_device)
+                mask_img = data['masks'][0].data[0].to(_device)
+                learned_img, attack_meta = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=_device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=cfg.num_samples, debug=cfg.debug, target_class=getattr(cfg, 'target_class', None))
                 data['img'] = learned_img
 
                 # Map batch positions to nuScenes sample tokens.
@@ -288,7 +319,23 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
                         attack_log_local[token] = info
                         # print(f'attack {type(token)}')
 
-            result = model(
+            if _use_dp:
+                # MMDataParallel.scatter handles device placement automatically;
+                # data stays on CPU and is scattered to each GPU by the framework.
+                pass
+            else:
+                # Single-GPU path: manually move DC tensors to _device before
+                # the forward call.  'img' in the no_attack path arrives as
+                # [DC(cpu_tensor)] and needs moving; in the attack path it was
+                # already replaced with a GPU tensor by mask_imgs above.
+                for key, val in data.items():
+                    if key == 'img' and no_attack and isinstance(val, list):
+                        for dc in val:
+                            _dc_to_device(dc, _device)
+                    elif key != 'img':
+                        _dc_to_device(val, _device)
+
+            result = eval_model(
                 return_loss=False,  # FIXME turn this to true and the whole thing explodes
                 rescale=True,
                 **data

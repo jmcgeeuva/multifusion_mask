@@ -136,13 +136,13 @@ def train_attack(
         outputs = test_attack(
             model=model,
             no_attack=True,
-            yolo_model=yolo_model, 
-            data_loader=val_loader,
+            yolo_model=yolo_model,
+            data_loader=val_loader_noatk,
             tex_trans=tex_trans,
             camou_para1=None,
-            allowed_words=allowed_words, 
+            allowed_words=allowed_words,
             tmpdir=tmpdir,
-            gpu_collect=False, 
+            gpu_collect=False,
             cfg=cfg
         )
 
@@ -163,10 +163,8 @@ def train_attack(
     # model.eval()
     time.sleep(2)  # This line can prevent deadlock problem in some cases.
 
-    if device == 'cpu':
-        model.detach = False
-    else:
-        model.module.detach = False
+    underlying = model.module if hasattr(model, 'module') else model
+    underlying.detach = False
     for epoch in range(max_epochs):
         model.train()
         running_loss = 0
@@ -177,16 +175,28 @@ def train_attack(
         for data in train_loaders: 
             optimizer.zero_grad(set_to_none=True)
             
-            imgs = data['img'].data[0]
-            mask_img = data['masks'].data[0]
+            imgs = data['img'].data[0].to(device)
+            mask_img = data['masks'].data[0].to(device)
             batch_size = imgs.shape[0]
-            # imgs = imgs.to(device=device)
             camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
-            learned_camou = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=imgs.device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=num_samples, debug=cfg.debug)[0]
-            # assert learned_camou.data[0].requires_grad, "Learned_camou does not require gradient"
-            # learned_camou.data[0] = learned_camou.data[0].cpu()
-            
+            learned_camou = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=num_samples, debug=cfg.debug)[0]
+
             data['img'] = learned_camou
+            # Move all remaining DC-wrapped tensors to the model's device.
+            # MMDataParallel.scatter normally does this, but the attack loop
+            # calls the model directly so we handle it explicitly here.
+            for key, val in data.items():
+                if key == 'img':
+                    continue
+                if hasattr(val, '_data') and isinstance(val._data, list) and val._data:
+                    inner = val._data[0]
+                    if isinstance(inner, torch.Tensor):
+                        val._data[0] = inner.to(device)
+                    elif isinstance(inner, list):
+                        val._data[0] = [
+                            x.to(device) if isinstance(x, torch.Tensor) else x
+                            for x in inner
+                        ]
 
             losses = model(return_loss=True, **data)
             # out = model.train_step(data, optimizer)
@@ -503,6 +513,21 @@ def main():
         dist=cfg.distributed,
         shuffle=False
     )
+    # Build a wider loader for the no-attack baseline evaluation so MMDataParallel
+    # can spread inference across all available GPUs.  batch_size = num_gpus × 1,
+    # with the DC collated into num_gpus groups so scatter sends 1 sample per GPU.
+    _n_eval_gpus = torch.cuda.device_count() if not cfg.distributed else 1
+    if _n_eval_gpus > 1:
+        val_loader_noatk = build_dataloader(
+            val_dataset,
+            samples_per_gpu=1,
+            workers_per_gpu=cfg.data.workers_per_gpu,
+            num_gpus=_n_eval_gpus,
+            dist=cfg.distributed,
+            shuffle=False
+        )
+    else:
+        val_loader_noatk = val_loader
     
     model = load_model(cfg, args, datasets)
     logger.info(f'Model:\n{model}')
@@ -514,9 +539,10 @@ def main():
 
     # put model on gpus
     if not cfg.distributed:
-        # model = MMDataParallel(
-        #     model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
-        model = model.cpu()
+        model = model.cuda(cfg.gpu_ids[0])
+        print(f'[GPU] CUDA available: {torch.cuda.is_available()}')
+        print(f'[GPU] Using device: cuda:{cfg.gpu_ids[0]} ({torch.cuda.get_device_name(cfg.gpu_ids[0])})')
+        print(f'[GPU] Model device: {next(model.parameters()).device}')
     else:
         find_unused_parameters = cfg.get('find_unused_parameters', False)
         # Sets the `find_unused_parameters` parameter in
@@ -536,12 +562,12 @@ def main():
 
     train_attack(
         model=model,
-        yolo_model=yolo_model, 
+        yolo_model=yolo_model,
         work_dir=args.log_dir,
         train_loaders=train_loaders,
         val_loader=val_loader,
         rank=rank,
-        device='cpu',
+        device=f'cuda:{cfg.gpu_ids[0]}' if not cfg.distributed else f'cuda:{torch.cuda.current_device()}',
         world_size=world_size,
         num_samples=cfg.num_samples,
         max_epochs=cfg.max_epochs,

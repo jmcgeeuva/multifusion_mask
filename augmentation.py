@@ -1,6 +1,7 @@
 import torchvision.transforms as transforms
 import numpy as np
 import math
+import torch
 
 class RandomRotate(object):
     def __init__(self, p, angle):
