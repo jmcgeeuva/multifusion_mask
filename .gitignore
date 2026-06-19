@@ -11,3 +11,4 @@
 **.pkl
 **_attack_log.json
 **/logs/**
+**nuscenes_masks_index**
