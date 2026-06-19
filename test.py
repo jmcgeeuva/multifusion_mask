@@ -303,7 +303,7 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
     for i, data in enumerate(data_loader):
         with torch.no_grad():
             if not no_attack:
-                camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
+                camou_trans = tex_trans(camou_para1, size=img_size)
 
                 imgs = data['img'][0].data[0].to(_device)
                 mask_img = data['masks'][0].data[0].to(_device)
