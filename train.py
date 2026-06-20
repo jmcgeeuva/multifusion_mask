@@ -179,7 +179,18 @@ def train_attack(
             mask_img = data['masks'].data[0].to(device)
             batch_size = imgs.shape[0]
             camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
-            learned_camou = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=num_samples, debug=cfg.debug)[0]
+            learned_camou = mask_imgs(
+                yolo_model, 
+                imgs, 
+                mask_img, 
+                camou_trans, 
+                allowed_words, 
+                device=device, 
+                dynamic_check=cfg.dynamic_ratio, 
+                ratio_check=cfg.area_ratio, 
+                num_samples=num_samples, 
+                debug=cfg.debug
+            )[0]
 
             data['img'] = learned_camou
             # Move all remaining DC-wrapped tensors to the model's device.
@@ -199,19 +210,42 @@ def train_attack(
                         ]
 
             losses = model(return_loss=True, **data)
-            # out = model.train_step(data, optimizer)
-            heatmap_loss = cfg.gamma_heatmap*losses['loss_heatmap']
-            cls_loss = cfg.gamma_cls*losses['layer_-1_loss_cls']
-            bbox_loss = cfg.gamma_bbox*losses['layer_-1_loss_bbox']
+            heatmap_loss = cfg.gamma_heatmap * losses['loss_heatmap']
+            cls_loss     = cfg.gamma_cls     * losses['layer_-1_loss_cls']
+            bbox_loss    = cfg.gamma_bbox    * losses['layer_-1_loss_bbox']
 
-            loss_tensor = heatmap_loss+cls_loss+bbox_loss
+            loss_tensor = heatmap_loss + cls_loss + bbox_loss
+
+            # Optional debug logging for individual GIAD sub-components.
+            # When loss_heatmap type is GIADLoss, the head adds
+            # 'loss_giad_*' keys to the losses dict automatically.
+            if cfg.get('debug', False):
+                giad_keys = [k for k in losses if k.startswith('loss_giad_')]
+                if giad_keys:
+                    parts = '  '.join(
+                        f'{k}={losses[k].item():.4f}' for k in sorted(giad_keys)
+                    )
+                    print(f'[GIAD] {parts}')
+                catk_keys = [k for k in losses if k.startswith('layer_-1_loss_catk_')]
+                if catk_keys:
+                    parts = '  '.join(
+                        f'{k}={losses[k].item():.4f}' for k in sorted(catk_keys)
+                    )
+                    print(f'[ClassAttack] {parts}')
+                batk_keys = [k for k in losses if k.startswith('layer_-1_loss_batk_')]
+                if batk_keys:
+                    parts = '  '.join(
+                        f'{k}={losses[k].item():.4f}' for k in sorted(batk_keys)
+                    )
+                    print(f'[BBoxAttack] {parts}')
+
             # Want to increase the error
             # FIXME NON-ADVERSARIAL CAN BE TESTED HERE BY REMOVING "2 -" and making it a loss minimization problem
             non_adv = True
             if not non_adv:
-                total_loss = cfg.lambda_reduce*(2 - (loss_tensor))
+                total_loss = cfg.lambda_reduce * (2 - loss_tensor)
             else:
-                total_loss = cfg.lambda_reduce*((loss_tensor))
+                total_loss = cfg.lambda_reduce * loss_tensor
             # Smoothing of the camouflage
             total_loss = total_loss + cfg.lambda_smooth*(loss_smooth(camou_para))
             total_loss = total_loss + cfg.lambda_nps*(loss_nps(camou_para, color_set))

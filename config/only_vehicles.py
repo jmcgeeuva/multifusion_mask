@@ -175,10 +175,93 @@ model = dict(
             score_threshold=0.0,
             code_size=10,
         ),
-        loss_cls=dict(type='FocalLoss', use_sigmoid=True, gamma=2, alpha=0.25, reduction='mean', loss_weight=1.0),
+        loss_cls=dict(
+            type='ClassAttackLoss',
+            use_sigmoid=True,
+            gamma=2.0,
+            alpha=0.25,
+            reduction='mean',
+            loss_weight=1.0,
+            debug=False,
+
+            # ── toggle each component ──────────────────────────────────────
+            use_original_focal=True,      # standard FocalLoss baseline
+            use_reverse_focal=False,      # −FocalLoss: maximise cls loss directly
+            use_complement_loss=False,    # −log(1−p_y): push correct class down
+            use_uniform_confusion=False,  # BCE toward uniform wrong-class target
+            use_margin_confusion=False,   # relu(z_y − z_wrong + margin): attack decision boundary
+            use_hard_wrong_class=False,   # −log(p_wrong): boost hardest wrong class
+
+            # ── relative weight of each enabled component ──────────────────
+            lambda_original=1.0,
+            lambda_reverse=1.0,
+            lambda_complement=1.0,
+            lambda_uniform=1.0,
+            lambda_margin=1.0,
+            lambda_hard_wrong=1.0,
+
+            # ── tuning ─────────────────────────────────────────────────────
+            margin=0.0,       # hinge margin for margin_confusion (0 = no margin)
+        ),
         # loss_iou=dict(type='CrossEntropyLoss', use_sigmoid=True, reduction='mean', loss_weight=0.0),
-        loss_bbox=dict(type='L1Loss', reduction='mean', loss_weight=0.25),
-        loss_heatmap=dict(type='GaussianFocalLoss', reduction='mean', loss_weight=1.0),
+        loss_bbox=dict(
+            type='BBoxAttackLoss',
+            reduction='mean',
+            loss_weight=0.25,
+            debug=False,
+
+            # ── toggle each component ──────────────────────────────────────
+            use_original_l1=True,          # standard L1 baseline
+            use_reverse_l1=False,          # −L1: maximise regression error directly
+            use_translation_attack=False,  # −||centre_pred − centre_gt||: push centre away
+            use_orbit_attack=False,        # L1(centre_pred, centre_gt + r*rand_dir): orbital target
+            use_scale_attack=False,        # −||dims_pred − dims_gt||: corrupt log(w,l,h)
+            use_orientation_attack=False,  # cos(yaw_pred − yaw_gt): maximise angular error
+
+            # ── relative weight of each enabled component ──────────────────
+            lambda_original=1.0,
+            lambda_reverse=1.0,
+            lambda_translation=1.0,
+            lambda_orbit=1.0,
+            lambda_scale=1.0,
+            lambda_orientation=1.0,
+
+            # ── tuning ─────────────────────────────────────────────────────
+            # orbit_radius is in encoded BEV units: 1 unit ≈ 0.6 m
+            # (out_size_factor=8 × voxel_size=0.075 m)
+            orbit_radius=2.0,
+        ),
+        loss_heatmap=dict(
+            type='GIADLoss',
+            reduction='mean',
+            loss_weight=1.0,
+            debug=False,
+
+            # ── toggle each component ──────────────────────────────────────
+            use_original_gaussian_loss=True,
+            use_ring_loss=False,
+            use_attention_diffusion=False,
+            use_entropy_loss=False,
+            use_contrast_loss=False,
+            use_veiling_luminance=False,
+
+            # ── relative weight of each enabled component ──────────────────
+            lambda_original=1.0,
+            lambda_ring=1.0,
+            lambda_diffusion=1.0,
+            lambda_entropy=1.0,
+            lambda_contrast=1.0,
+            lambda_veiling=1.0,
+
+            # ── kernel tuning ─────────────────────────────────────────────
+            ring_radius=3.0,
+            ring_sigma=1.0,
+            diffusion_iterations=3,
+            diffusion_kernel_size=5,
+            contrast_window=11,
+            veiling_power=2.0,
+            veiling_epsilon=1e-6,
+        ),
     ),
 
 
@@ -394,7 +477,7 @@ test_pipeline = [
 
 data = dict(
     samples_per_gpu=1,
-    workers_per_gpu=2,
+    workers_per_gpu=1,
     train=dict(
         type='CBGSDataset',
         # type='SimpleDataset',

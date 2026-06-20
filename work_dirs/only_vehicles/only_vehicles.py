@@ -8,7 +8,7 @@ max_epochs = 1000
 camou_path = './workdir/20251111_215729/2camou.npy'
 freq = 0
 num_samples = 1
-allowed_words = './vehicle_words.txt'
+allowed_words = './nuscenes_words.txt'
 target_class = 'car'
 dynamic_ratio = False
 area_ratio = 0.002
@@ -144,15 +144,68 @@ model = dict(
             score_threshold=0.0,
             code_size=10),
         loss_cls=dict(
-            type='FocalLoss',
+            type='ClassAttackLoss',
             use_sigmoid=True,
-            gamma=2,
+            gamma=2.0,
             alpha=0.25,
             reduction='mean',
-            loss_weight=1.0),
-        loss_bbox=dict(type='L1Loss', reduction='mean', loss_weight=0.25),
+            loss_weight=1.0,
+            debug=False,
+            use_original_focal=True,
+            use_reverse_focal=False,
+            use_complement_loss=False,
+            use_uniform_confusion=False,
+            use_margin_confusion=False,
+            use_hard_wrong_class=False,
+            lambda_original=1.0,
+            lambda_reverse=1.0,
+            lambda_complement=1.0,
+            lambda_uniform=1.0,
+            lambda_margin=1.0,
+            lambda_hard_wrong=1.0,
+            margin=0.0),
+        loss_bbox=dict(
+            type='BBoxAttackLoss',
+            reduction='mean',
+            loss_weight=0.25,
+            debug=False,
+            use_original_l1=True,
+            use_reverse_l1=False,
+            use_translation_attack=False,
+            use_orbit_attack=False,
+            use_scale_attack=False,
+            use_orientation_attack=False,
+            lambda_original=1.0,
+            lambda_reverse=1.0,
+            lambda_translation=1.0,
+            lambda_orbit=1.0,
+            lambda_scale=1.0,
+            lambda_orientation=1.0,
+            orbit_radius=2.0),
         loss_heatmap=dict(
-            type='GaussianFocalLoss', reduction='mean', loss_weight=1.0)),
+            type='GIADLoss',
+            reduction='mean',
+            loss_weight=1.0,
+            debug=False,
+            use_original_gaussian_loss=True,
+            use_ring_loss=False,
+            use_attention_diffusion=False,
+            use_entropy_loss=False,
+            use_contrast_loss=False,
+            use_veiling_luminance=False,
+            lambda_original=1.0,
+            lambda_ring=1.0,
+            lambda_diffusion=1.0,
+            lambda_entropy=1.0,
+            lambda_contrast=1.0,
+            lambda_veiling=1.0,
+            ring_radius=3.0,
+            ring_sigma=1.0,
+            diffusion_iterations=3,
+            diffusion_kernel_size=5,
+            contrast_window=11,
+            veiling_power=2.0,
+            veiling_epsilon=1e-06)),
     train_cfg=dict(
         pts=dict(
             dataset='nuScenes',
@@ -239,7 +292,8 @@ train_pipeline = [
     dict(
         type='LoadMultiViewImageFromFilesV2_Camou',
         to_float32=True,
-        mask_path='./data/nuscenes/nuscenes_masks'),
+        mask_path='/standard/eng_vivastorage/nuscenes/nuscenes/nuscenes_masks',
+        index_file='./nuscenes_masks_index.txt'),
     dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
@@ -366,7 +420,8 @@ test_pipeline = [
     dict(
         type='LoadMultiViewImageFromFilesV2_Camou',
         to_float32=True,
-        mask_path='./data/nuscenes/nuscenes_masks'),
+        mask_path='/standard/eng_vivastorage/nuscenes/nuscenes/nuscenes_masks',
+        index_file='./nuscenes_masks_index.txt'),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(384, 1056),
@@ -417,7 +472,7 @@ test_pipeline = [
 ]
 data = dict(
     samples_per_gpu=1,
-    workers_per_gpu=2,
+    workers_per_gpu=1,
     train=dict(
         type='CBGSDataset',
         dataset=dict(
@@ -428,7 +483,9 @@ data = dict(
                 dict(
                     type='LoadMultiViewImageFromFilesV2_Camou',
                     to_float32=True,
-                    mask_path='./data/nuscenes/nuscenes_masks'),
+                    mask_path=
+                    '/standard/eng_vivastorage/nuscenes/nuscenes/nuscenes_masks',
+                    index_file='./nuscenes_masks_index.txt'),
                 dict(
                     type='LoadPointsFromFile',
                     coord_type='LIDAR',
@@ -583,7 +640,9 @@ data = dict(
             dict(
                 type='LoadMultiViewImageFromFilesV2_Camou',
                 to_float32=True,
-                mask_path='./data/nuscenes/nuscenes_masks'),
+                mask_path=
+                '/standard/eng_vivastorage/nuscenes/nuscenes/nuscenes_masks',
+                index_file='./nuscenes_masks_index.txt'),
             dict(
                 type='MultiScaleFlipAug3D',
                 img_scale=(384, 1056),
@@ -664,7 +723,9 @@ data = dict(
             dict(
                 type='LoadMultiViewImageFromFilesV2_Camou',
                 to_float32=True,
-                mask_path='./data/nuscenes/nuscenes_masks'),
+                mask_path=
+                '/standard/eng_vivastorage/nuscenes/nuscenes/nuscenes_masks',
+                index_file='./nuscenes_masks_index.txt'),
             dict(
                 type='MultiScaleFlipAug3D',
                 img_scale=(384, 1056),

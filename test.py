@@ -315,7 +315,19 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
                 imgs = data['img'][0].data[0].to(_device)
                 mask_img = data['masks'][0].data[0].to(_device)
                 _img_metas = data['img_metas'][0].data[0]
-                learned_img, attack_meta = mask_imgs(yolo_model, imgs, mask_img, camou_trans, allowed_words, device=_device, dynamic_check=cfg.dynamic_ratio, ratio_check=cfg.area_ratio, num_samples=cfg.num_samples, debug=cfg.debug, target_class=getattr(cfg, 'target_class', None), img_metas=_img_metas)
+                learned_img, attack_meta = mask_imgs(
+                    yolo_model, 
+                    imgs, 
+                    mask_img, 
+                    camou_trans, 
+                    allowed_words, 
+                    device=_device, 
+                    dynamic_check=cfg.dynamic_ratio, 
+                    ratio_check=cfg.area_ratio, 
+                    num_samples=cfg.num_samples, 
+                    debug=cfg.debug, 
+                    target_class=getattr(cfg, 'target_class', None), 
+                    img_metas=_img_metas)
                 data['img'] = learned_img
 
                 # Map batch positions to nuScenes sample tokens.
