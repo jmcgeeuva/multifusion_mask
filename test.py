@@ -485,6 +485,12 @@ def parse_args():
              'and only the attacked class. '
              '"instance": additionally projects 3D GT boxes to camera space and '
              'matches against the precomputed mask bbox to isolate the attacked instance.')
+    parser.add_argument(
+        '--reference-log',
+        default=None,
+        help='Path to _attack_log.json saved by a prior attack run. '
+             'Use with --no-attack + --attack-filter so the no-attack baseline '
+             'is evaluated on the exact same samples/instances as the attack run.')
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -682,10 +688,19 @@ def main():
 
     rank, _ = get_dist_info()
     if rank == 0:
+        # For no-attack baseline runs: substitute the attack log from a prior
+        # attack run so the filter scopes to the exact same samples/instances.
+        if args.reference_log:
+            import json
+            with open(args.reference_log) as _f:
+                attack_log = json.load(_f)
+            print(f'Using reference attack log ({len(attack_log)} samples) '
+                  f'from {args.reference_log}')
+
         if args.out:
             print(f'\nwriting results to {args.out}')
             mmcv.dump(outputs, args.out)
-            if args.attack_filter != 'none':
+            if args.attack_filter != 'none' and not args.no_attack:
                 log_path = args.out.replace('.pkl', '_attack_log.json')
                 if len(attack_log) == 0:
                     raise ValueError('attack_log is blank')
@@ -703,8 +718,6 @@ def main():
             ]:
                 eval_kwargs.pop(key, None)
             eval_kwargs.update(dict(metric=args.eval, **kwargs))
-            # if args.result_dir is not None:
-            #     eval_kwargs.update(pklfile_prefix=os.path.dirname(args.result_dir))
             if args.attack_filter != 'none':
                 eval_kwargs.update(
                     attack_log=attack_log,

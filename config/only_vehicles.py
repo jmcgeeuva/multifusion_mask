@@ -13,7 +13,7 @@ camou_path="./workdir/20251111_215729/2camou.npy"
 ################# ablation ###################
 freq = 0
 num_samples=1
-allowed_words='./vehicle_words.txt'
+allowed_words='./nuscenes_words.txt'
 target_class='car'  # nuScenes class name logged in the attack log for filtering
 dynamic_ratio=False
 area_ratio=0.002
