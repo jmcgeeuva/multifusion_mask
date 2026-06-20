@@ -7,6 +7,7 @@ For each sample in the attack log, renders two panels:
   RIGHT – attack predictions on the same image
 
 Predicted boxes of the attacked class are highlighted.
+The specific GT box that was attacked is drawn in magenta on both panels.
 Also writes a BEV (top-down) comparison panel per sample.
 
 Usage
@@ -51,39 +52,43 @@ CAM_CHANNELS = [
     'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_BACK_RIGHT',
 ]
 
-# Colour scheme: baseline=green, attack=red, gt=blue
-BASELINE_COLOR = (0, 200, 0)    # BGR
-ATTACK_COLOR   = (0, 0, 220)    # BGR
-HIGHLIGHT_COLOR = (0, 165, 255) # BGR – attacked class boxes in attack panel
+# Colour scheme
+BASELINE_COLOR    = (0, 200, 0)    # BGR – baseline detections
+ATTACK_COLOR      = (0, 0, 220)    # BGR – attack detections
+HIGHLIGHT_COLOR   = (0, 165, 255)  # BGR – attacked class boxes
+ATTACKED_GT_COLOR = (255, 0, 255)  # BGR – magenta for the specific attacked GT box
+
+# IS-Fusion preprocessing constants (resize then center-crop to 1056×384)
+_RESIZE = 0.72
+_CROP_X = 48    # left crop offset after resize
+_CROP_Y = 264   # top crop offset after resize
 
 
 # ─── geometry helpers ────────────────────────────────────────────────────────
 
-def lidar_box_corners(box_tensor):
-    """Return (N, 8, 3) corners in LiDAR coords for a batch of LiDAR boxes.
+def lidar_box_corners(box_np):
+    """Return (N, 8, 3) corners using IS-Fusion's LiDARInstance3DBoxes.
 
-    box_tensor: (N, 9) – [cx, cy, cz, dx, dy, dz, yaw, vx, vy]
+    box_np: (N, 7+) – prediction boxes in bottom-center convention
+    (origin (0.5, 0.5, 0) per LiDARInstance3DBoxes default).
     """
-    cx, cy, cz = box_tensor[:, 0], box_tensor[:, 1], box_tensor[:, 2]
-    dx, dy, dz = box_tensor[:, 3], box_tensor[:, 4], box_tensor[:, 5]
-    yaw = box_tensor[:, 6]
-    N = len(cx)
+    import torch
+    from mmdet3d.core.bbox import LiDARInstance3DBoxes
+    arr = box_np[:, :7].astype(np.float32)
+    boxes = LiDARInstance3DBoxes(torch.from_numpy(arr))
+    return boxes.corners.numpy()  # (N, 8, 3)
 
-    # unit box corners in local frame (bottom-centre origin)
-    unit = np.array([
-        [ 1,  1, 0], [ 1, -1, 0], [-1, -1, 0], [-1,  1, 0],   # bottom
-        [ 1,  1, 1], [ 1, -1, 1], [-1, -1, 1], [-1,  1, 1],   # top
-    ], dtype=np.float32) * 0.5  # (8,3)
 
-    corners = np.zeros((N, 8, 3), dtype=np.float32)
-    for i in range(N):
-        c, s = np.cos(yaw[i]), np.sin(yaw[i])
-        R = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float32)
-        pts = unit * np.array([dx[i], dy[i], dz[i]])  # scale
-        pts = (R @ pts.T).T                             # rotate
-        pts += np.array([cx[i], cy[i], cz[i] + dz[i] / 2])  # translate (gravity centre)
-        corners[i] = pts
-    return corners
+def gt_box_corners(box_np):
+    """Return (N, 8, 3) corners for GT boxes loaded from data_infos.
+
+    data_infos gt_boxes are stored with gravity-center z, so origin=(0.5,0.5,0.5).
+    """
+    import torch
+    from mmdet3d.core.bbox import LiDARInstance3DBoxes
+    arr = box_np[:, :7].astype(np.float32)
+    boxes = LiDARInstance3DBoxes(torch.from_numpy(arr), origin=(0.5, 0.5, 0.5))
+    return boxes.corners.numpy()  # (N, 8, 3)
 
 
 def project_corners_to_img(corners_3d, lidar2img):
@@ -124,9 +129,31 @@ def draw_box_on_img(img, corners_2d, color, thickness=2):
 def render_detections_on_img(raw_img, boxes_tensor, scores, labels,
                              lidar2img, score_thr,
                              default_color, highlight_label=None,
-                             highlight_color=None):
-    """Return a copy of raw_img with all detection boxes drawn."""
+                             highlight_color=None,
+                             attacked_gt_corners=None):
+    """Return a copy of raw_img with all detection boxes drawn.
+
+    attacked_gt_corners: (8, 3) LiDAR corners of the specific GT box that was
+    attacked. Drawn in magenta with extra thickness. None to skip.
+    """
     img = raw_img.copy()
+    H, W = img.shape[:2]
+
+    # Draw the attacked GT box first (so it renders beneath prediction boxes)
+    if attacked_gt_corners is not None:
+        gt_arr = attacked_gt_corners[np.newaxis]  # (1, 8, 3)
+        gt_2d, gt_valid = project_corners_to_img(gt_arr, lidar2img)
+        if gt_valid[0]:
+            draw_box_on_img(img, gt_2d[0], ATTACKED_GT_COLOR, thickness=4)
+            mid_raw = gt_2d[0][4:6].mean(axis=0)
+            if -W < mid_raw[0] < 2*W and -H < mid_raw[1] < 2*H:
+                mid_x = int(np.clip(mid_raw[0], 2, W - 2))
+                mid_y = int(np.clip(mid_raw[1], 12, H - 2))
+                cv2.putText(img, 'ATTACKED GT',
+                            (mid_x, mid_y - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                            ATTACKED_GT_COLOR, 2, cv2.LINE_AA)
+
     if len(boxes_tensor) == 0:
         return img
 
@@ -149,15 +176,17 @@ def render_detections_on_img(raw_img, boxes_tensor, scores, labels,
         thick  = 3 if is_highlight else 2
         draw_box_on_img(img, pts_2d[i], color, thickness=thick)
 
-        # score label above the front-top edge midpoint
-        mid = pts_2d[i][4:6].mean(axis=0)
-        txt = f'{CLASSES[lb[i]]} {sc[i]:.2f}'
-        font_scale = 0.5 if is_highlight else 0.4
-        # raise ValueError(int(mid[0]), int(mid[1]))
-        # cv2.putText(img, txt,
-        #             (int(mid[0]), int(mid[1]) - 4),
-        #             cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 1,
-        #             cv2.LINE_AA)
+        # Score label near the top-front edge, clipped to image bounds
+        mid_raw = pts_2d[i][4:6].mean(axis=0)
+        if -W < mid_raw[0] < 2*W and -H < mid_raw[1] < 2*H:
+            mid_x = int(np.clip(mid_raw[0], 2, W - 2))
+            mid_y = int(np.clip(mid_raw[1], 12, H - 2))
+            txt = f'{CLASSES[lb[i]]} {sc[i]:.2f}'
+            font_scale = 0.5 if is_highlight else 0.4
+            cv2.putText(img, txt,
+                        (mid_x, mid_y - 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 1,
+                        cv2.LINE_AA)
     return img
 
 
@@ -180,7 +209,8 @@ def bev_box_polygon(box_row):
 
 def render_bev(baseline_boxes, baseline_scores, baseline_labels,
                attack_boxes,   attack_scores,   attack_labels,
-               attacked_label, score_thr, pc_range=(-54, -54, 54, 54)):
+               attacked_label, score_thr, attacked_gt_box=None,
+               pc_range=(-54, -54, 54, 54)):
     """Return a matplotlib Figure comparing BEV detections."""
     fig, axes = plt.subplots(1, 2, figsize=(16, 8))
     titles = ['Baseline', 'Attack']
@@ -199,6 +229,12 @@ def render_bev(baseline_boxes, baseline_scores, baseline_labels,
         for spine in ax.spines.values():
             spine.set_edgecolor('white')
 
+        # Draw attacked GT box first so predictions render on top
+        if attacked_gt_box is not None:
+            poly = bev_box_polygon(attacked_gt_box)
+            ax.plot(poly[:, 0], poly[:, 1], color='#ff00ff',
+                    linewidth=3, linestyle='--')
+
         if len(boxes) == 0:
             continue
         mask = scores >= score_thr
@@ -213,10 +249,11 @@ def render_bev(baseline_boxes, baseline_scores, baseline_labels,
                     linewidth=2 if is_attacked else 1)
 
     legend_elements = [
-        Line2D([0], [0], color='#ff4444', linewidth=2, label=f'Attacked class'),
+        Line2D([0], [0], color='#ff4444', linewidth=2, label='Attacked class'),
         Line2D([0], [0], color='#44ff44', linewidth=1, label='Other classes'),
+        Line2D([0], [0], color='#ff00ff', linewidth=3, linestyle='--', label='Attacked GT'),
     ]
-    fig.legend(handles=legend_elements, loc='lower center', ncol=2,
+    fig.legend(handles=legend_elements, loc='lower center', ncol=3,
                facecolor='#1a1a2e', labelcolor='white', fontsize=10)
     fig.patch.set_facecolor('#1a1a2e')
     fig.tight_layout(rect=[0, 0.05, 1, 1])
@@ -236,7 +273,10 @@ def build_token_index(data_infos):
 
 
 def get_lidar2img(cam_info):
-    """Compute raw lidar→image matrix from cam_info (original resolution)."""
+    """Compute raw lidar→image matrix from cam_info (original resolution).
+
+    Matches IS-Fusion's NuScenesDataset.get_data_info() exactly.
+    """
     lidar2cam_r = np.linalg.inv(cam_info['sensor2lidar_rotation'])
     lidar2cam_t = cam_info['sensor2lidar_translation'] @ lidar2cam_r.T
     lidar2cam_rt = np.eye(4, dtype=np.float32)
@@ -244,7 +284,7 @@ def get_lidar2img(cam_info):
     lidar2cam_rt[3, :3]  = -lidar2cam_t
     intrinsic = np.array(cam_info['cam_intrinsic'], dtype=np.float32)
     viewpad = np.eye(4, dtype=np.float32)
-    viewpad[:3, :3] = intrinsic
+    viewpad[:intrinsic.shape[0], :intrinsic.shape[1]] = intrinsic
     return (viewpad @ lidar2cam_rt.T).astype(np.float32)
 
 
@@ -255,6 +295,52 @@ def extract_boxes(result):
     scores = pb['scores_3d'].cpu().numpy()
     labels = pb['labels_3d'].cpu().numpy().astype(int)
     return boxes, scores, labels
+
+
+def find_attacked_gt_box(info, atk_cls_name, bbox_2d, lidar2img, img_shape):
+    """Find the GT box from data_infos closest to the YOLO-detected attack target.
+
+    bbox_2d is in preprocessed image space (after _RESIZE scale and _CROP offset).
+    We undo that to get the approximate original-image pixel location, then find
+    the GT box whose projected 2D centre is closest.
+
+    Returns a (1, 7) numpy array of the matched GT box, or None.
+    """
+    gt_boxes = info.get('gt_boxes')
+    gt_names = info.get('gt_names')
+    if gt_boxes is None or gt_names is None or len(gt_boxes) == 0:
+        return None
+
+    cls_mask = gt_names == atk_cls_name
+    if not cls_mask.any():
+        return None
+
+    cls_boxes = gt_boxes[cls_mask]  # (M, 7), gravity-center z
+
+    # Convert bbox_2d centre from preprocessed → original image coords
+    pp_cx = (bbox_2d[0] + bbox_2d[2]) / 2.0
+    pp_cy = (bbox_2d[1] + bbox_2d[3]) / 2.0
+    orig_cx = (pp_cx + _CROP_X) / _RESIZE
+    orig_cy = (pp_cy + _CROP_Y) / _RESIZE
+
+    corners = gt_box_corners(cls_boxes)          # (M, 8, 3)
+    pts_2d, valid = project_corners_to_img(corners, lidar2img)  # (M, 8, 2)
+
+    best_dist = float('inf')
+    best_idx  = None
+    for i in range(len(cls_boxes)):
+        if not valid[i]:
+            continue
+        box_cx = pts_2d[i, :, 0].mean()
+        box_cy = pts_2d[i, :, 1].mean()
+        dist = (box_cx - orig_cx) ** 2 + (box_cy - orig_cy) ** 2
+        if dist < best_dist:
+            best_dist = dist
+            best_idx  = i
+
+    if best_idx is None:
+        return None
+    return cls_boxes[best_idx:best_idx + 1]  # (1, 7)
 
 
 # ─── main ────────────────────────────────────────────────────────────────────
@@ -294,7 +380,6 @@ def main():
 
     print('Loading nuScenes data infos...')
     data_infos_raw = load_pkl(args.info_file)
-    # nuscenes_infos_val.pkl is a dict with key 'infos' in some versions
     if isinstance(data_infos_raw, dict):
         data_infos = data_infos_raw['infos']
     else:
@@ -304,7 +389,6 @@ def main():
     print(f'  {len(data_infos)} samples indexed, '
           f'{len(attack_log)} tokens in attack log')
 
-    # Select tokens to render
     tokens = [args.token] if args.token else list(attack_log.keys())
     tokens = [t for t in tokens if t in token_to_idx]
     if not tokens:
@@ -321,12 +405,11 @@ def main():
         cam_idx      = atk_info['camera_idx']
         atk_cls_name = atk_info['nuscenes_class']
         atk_label    = CLASSES.index(atk_cls_name) if atk_cls_name in CLASSES else -1
+        bbox_2d      = atk_info.get('bbox_2d')
 
-        # Camera metadata
         cam_name  = CAM_CHANNELS[cam_idx]
         cam_info  = info['cams'][cam_name]
 
-        # data_path in the pkl starts with './data/nuscenes/' — strip it
         rel_path = cam_info['data_path']
         for _prefix in ('./data/nuscenes/', 'data/nuscenes/'):
             if rel_path.startswith(_prefix):
@@ -335,23 +418,30 @@ def main():
         img_path  = os.path.join(args.data_root, rel_path)
         lidar2img = get_lidar2img(cam_info)
 
-        # Load original camera image
         raw_img = cv2.imread(img_path)
         if raw_img is None:
             print(f'  [skip] cannot read image: {img_path}')
             continue
 
-        # Extract detections
+        # Find the specific attacked GT box
+        attacked_gt_box = None
+        attacked_gt_corners_3d = None
+        if bbox_2d is not None:
+            attacked_gt_box = find_attacked_gt_box(
+                info, atk_cls_name, bbox_2d, lidar2img, raw_img.shape)
+        if attacked_gt_box is not None:
+            attacked_gt_corners_3d = gt_box_corners(attacked_gt_box)[0]  # (8, 3)
+
         b_boxes, b_scores, b_labels = extract_boxes(baseline_results[idx])
         a_boxes, a_scores, a_labels = extract_boxes(attack_results[idx])
 
-        # Render camera views
         baseline_img = render_detections_on_img(
             raw_img, b_boxes, b_scores, b_labels,
             lidar2img, args.score_thr,
             default_color=BASELINE_COLOR,
             highlight_label=atk_label,
             highlight_color=HIGHLIGHT_COLOR,
+            attacked_gt_corners=attacked_gt_corners_3d,
         )
         attack_img = render_detections_on_img(
             raw_img, a_boxes, a_scores, a_labels,
@@ -359,9 +449,9 @@ def main():
             default_color=ATTACK_COLOR,
             highlight_label=atk_label,
             highlight_color=HIGHLIGHT_COLOR,
+            attacked_gt_corners=attacked_gt_corners_3d,
         )
 
-        # Annotate header strips
         strip_h = 40
         h, w = raw_img.shape[:2]
         for panel_img, label, color in [
@@ -373,16 +463,17 @@ def main():
                         (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 1, cv2.LINE_AA)
             panel_img[:] = np.vstack([strip, panel_img[strip_h:]])
 
-        # Count detected boxes of the attacked class above threshold
         def _count(boxes, scores, labels, label_idx, thr):
             m = (scores >= thr) & (labels == label_idx)
             return int(m.sum())
 
-        b_count = _count(b_boxes, b_scores, b_labels, atk_label, args.score_thr)
-        a_count = _count(a_boxes, a_scores, a_labels, atk_label, args.score_thr)
+        b_count  = _count(b_boxes, b_scores, b_labels, atk_label, args.score_thr)
+        a_count  = _count(a_boxes, a_scores, a_labels, atk_label, args.score_thr)
+        gt_found = 'yes' if attacked_gt_corners_3d is not None else 'no'
         footer_txt = (
             f'Baseline detects {b_count} {atk_cls_name}(s)  |  '
             f'Attack detects {a_count} {atk_cls_name}(s)  |  '
+            f'attacked GT found: {gt_found}  |  '
             f'token: {token[:16]}...'
         )
         footer = np.zeros((36, w * 2, 3), dtype=np.uint8)
@@ -395,13 +486,14 @@ def main():
         out_path = os.path.join(args.out_dir, f'{sample_num:04d}_{token[:16]}_{cam_name}.jpg')
         cv2.imwrite(out_path, final, [cv2.IMWRITE_JPEG_QUALITY, 92])
 
-        # Optional BEV
         if args.bev:
+            bev_gt = attacked_gt_box[0] if attacked_gt_box is not None else None
             fig = render_bev(
                 b_boxes, b_scores, b_labels,
                 a_boxes, a_scores, a_labels,
                 attacked_label=atk_label,
                 score_thr=args.score_thr,
+                attacked_gt_box=bev_gt,
             )
             bev_path = os.path.join(args.out_dir,
                                     f'{sample_num:04d}_{token[:16]}_bev.png')
@@ -411,6 +503,7 @@ def main():
 
         print(f'  [{sample_num+1}/{len(tokens)}] {cam_name} '
               f'| {atk_cls_name}: baseline={b_count} attack={a_count} '
+              f'| GT marked: {gt_found} '
               f'| {os.path.basename(out_path)}')
 
     print(f'\nDone. Wrote {len(tokens)} image(s) to {args.out_dir}/')
