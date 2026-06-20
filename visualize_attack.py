@@ -153,10 +153,11 @@ def render_detections_on_img(raw_img, boxes_tensor, scores, labels,
         mid = pts_2d[i][4:6].mean(axis=0)
         txt = f'{CLASSES[lb[i]]} {sc[i]:.2f}'
         font_scale = 0.5 if is_highlight else 0.4
-        cv2.putText(img, txt,
-                    (int(mid[0]), int(mid[1]) - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 1,
-                    cv2.LINE_AA)
+        # raise ValueError(int(mid[0]), int(mid[1]))
+        # cv2.putText(img, txt,
+        #             (int(mid[0]), int(mid[1]) - 4),
+        #             cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 1,
+        #             cv2.LINE_AA)
     return img
 
 

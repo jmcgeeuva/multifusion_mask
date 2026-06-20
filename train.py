@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import mmcv
 import torch
+import torch.distributed as dist
 from mmdet3d.apis import collect_results_gpu, collect_results_cpu
 from yolo_test import run_yolo8, plot_masks
 import matplotlib.patches as patches
@@ -113,31 +114,32 @@ def train_attack(
     # continuous color
     if cfg.camou_path is not None:
         camou_para, camou_para1 = load_camou(cfg.camou_path, expand_kernel, device=device)
+        begin_para = camou_para.detach().clone()
     else:
         camou_para = torch.rand([1, h, w, 3]).float().to(device)
         camou_para.requires_grad_(True)
         begin_para = deepcopy(camou_para)
         camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
-    
+
+    # Ensure all ranks start from the same texture (rank 0 is authoritative).
+    if cfg.distributed:
+        dist.broadcast(camou_para.data, src=0)
+
     optimizer = optim.Adam([camou_para], lr=cfg.lr)
-    
-    # if work_dir is None:
-    #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    #     directory_name = os.path.join(os.getcwd(), "paras", f"paras_{timestamp}")
-    #     os.makedirs(directory_name, exist_ok=True)
-    # else:
+
     os.makedirs(work_dir, exist_ok=True)
 
+    tex_trans = get_augmentation(img_size)
+
     if cfg.freq != 0:
-        tmpdir=os.path.join('./tmp', f'tmp_{timestamp}', 'pkl')
+        tmpdir = os.path.join('./tmp', f'tmp_{timestamp}', 'pkl')
         os.makedirs(tmpdir, exist_ok=True)
-        tmpdir=os.path.join(tmpdir, 'out.pkl')
-        # run validation
+        tmpdir = os.path.join(tmpdir, 'out.pkl')
         outputs = test_attack(
             model=model,
             no_attack=True,
             yolo_model=yolo_model,
-            data_loader=val_loader_noatk,
+            data_loader=val_loader,
             tex_trans=tex_trans,
             camou_para1=None,
             allowed_words=allowed_words,
@@ -145,7 +147,6 @@ def train_attack(
             gpu_collect=False,
             cfg=cfg
         )
-
         if rank == 0:
             list_stats(val_dataset, outputs, cfg)
 
@@ -157,8 +158,6 @@ def train_attack(
         except:
             print(f"failed to print or save {work_dir}")
     #####################################################################################
-    
-    tex_trans = get_augmentation(img_size)
 
     # model.eval()
     time.sleep(2)  # This line can prevent deadlock problem in some cases.
@@ -177,19 +176,22 @@ def train_attack(
             
             imgs = data['img'].data[0].to(device)
             mask_img = data['masks'].data[0].to(device)
+            _img_metas = data['img_metas'].data[0]
             batch_size = imgs.shape[0]
             camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
             learned_camou = mask_imgs(
-                yolo_model, 
-                imgs, 
-                mask_img, 
-                camou_trans, 
-                allowed_words, 
-                device=device, 
-                dynamic_check=cfg.dynamic_ratio, 
-                ratio_check=cfg.area_ratio, 
-                num_samples=num_samples, 
-                debug=cfg.debug
+                yolo_model,
+                imgs,
+                mask_img,
+                camou_trans,
+                allowed_words,
+                device=device,
+                dynamic_check=cfg.dynamic_ratio,
+                ratio_check=cfg.area_ratio,
+                num_samples=num_samples,
+                debug=cfg.debug,
+                target_class=getattr(cfg, 'target_class', None),
+                img_metas=_img_metas,
             )[0]
 
             data['img'] = learned_camou
@@ -250,6 +252,11 @@ def train_attack(
             total_loss = total_loss + cfg.lambda_smooth*(loss_smooth(camou_para))
             total_loss = total_loss + cfg.lambda_nps*(loss_nps(camou_para, color_set))
             total_loss.backward()
+            # Average camou_para gradients across all ranks so every rank
+            # applies the same optimizer update and textures stay in sync.
+            if cfg.distributed and camou_para.grad is not None:
+                dist.all_reduce(camou_para.grad.data, op=dist.ReduceOp.SUM)
+                camou_para.grad.data /= world_size
             running_loss += total_loss.item()
             optimizer.step()
             camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
@@ -259,6 +266,10 @@ def train_attack(
                 for _ in range(batch_size * world_size):
                     prog_bar.update()
         camou_png = cv2.cvtColor((camou_para1[0].detach().cpu().numpy()*255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+        if cfg.distributed:
+            loss_t = torch.tensor(running_loss, device=device)
+            dist.all_reduce(loss_t, op=dist.ReduceOp.SUM)
+            running_loss = loss_t.item() / world_size
         if rank == 0:
             print(f'\nCurrent loss: {running_loss/len(train_loaders)}')
             try:
@@ -578,9 +589,10 @@ def main():
         print(f'[GPU] Using device: cuda:{cfg.gpu_ids[0]} ({torch.cuda.get_device_name(cfg.gpu_ids[0])})')
         print(f'[GPU] Model device: {next(model.parameters()).device}')
     else:
-        find_unused_parameters = cfg.get('find_unused_parameters', False)
-        # Sets the `find_unused_parameters` parameter in
-        # torch.nn.parallel.DistributedDataParallel
+        # All model params are frozen (requires_grad=False), so no params
+        # participate in backward. find_unused_parameters=True tells DDP not
+        # to error when its reducer finds empty gradient buckets.
+        find_unused_parameters = cfg.get('find_unused_parameters', True)
         model = MMDistributedDataParallel(
             model.cuda(),
             device_ids=[torch.cuda.current_device()],
