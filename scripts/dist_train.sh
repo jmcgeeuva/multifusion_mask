@@ -13,7 +13,7 @@ CONFIG=$1
 GPUS=${2:-$(nvidia-smi --list-gpus | wc -l)}
 PORT=${PORT:-29500}
 
-now=$(date +"%Y%m%d_%H%M%S")
+now="${DIST_TRAIN_TIMESTAMP:-$(date +"%Y%m%d_%H%M%S")}"
 mkdir -p ./workdir/${now}/
 PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
 torchrun --nproc_per_node=$GPUS --master_port=$PORT \

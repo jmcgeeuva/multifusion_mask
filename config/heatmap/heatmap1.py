@@ -5,6 +5,7 @@
 
 _base_ = ['../only_vehicles.py']
 
+debug = True
 model = dict(
     pts_bbox_head=dict(
         loss_heatmap=dict(

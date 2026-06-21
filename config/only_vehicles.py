@@ -8,7 +8,6 @@ class_names = [
 checkpoint='./pretrained_models/IS-Fusion_epoch_10.pth'
 debug = False
 max_epochs=10
-camou_path="./workdir/20251111_215729/2camou.npy"
 
 ################# ablation ###################
 freq = 0
@@ -17,7 +16,7 @@ allowed_words='./nuscenes_words.txt'
 target_class='car'  # nuScenes class name logged in the attack log for filtering
 dynamic_ratio=False
 area_ratio=0.002
-lr=1.0e-3
+lr=0.07
 ##############################################
 
 color_map=[
@@ -233,13 +232,13 @@ model = dict(
 
             # ── toggle each component ──────────────────────────────────────
             use_original_gaussian_loss=False,
-            lambda_original=0.0,
-            use_reverse_gaussian_loss=False,
+            lambda_original=1.0,
+            use_reverse_gaussian_loss=False,   # adversarial: maximise heatmap loss
             lambda_reverse=1.0,
             use_ring_loss=False,
             lambda_ring=1.0,
-            use_attention_diffusion=True,
-            lambda_diffusion=1000.0,
+            use_attention_diffusion=False,
+            lambda_diffusion=1.0,
             use_entropy_loss=False,
             lambda_entropy=1.0,
             use_contrast_loss=False,
@@ -471,7 +470,7 @@ test_pipeline = [
 
 data = dict(
     samples_per_gpu=2,
-    workers_per_gpu=6,
+    workers_per_gpu=4,
     train=dict(
         type='CBGSDataset',
         # type='SimpleDataset',

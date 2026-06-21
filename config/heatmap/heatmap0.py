@@ -5,6 +5,7 @@
 
 _base_ = ['../only_vehicles.py']
 
+# camou_path="./workdir/20251111_215729/2camou.npy"
 model = dict(
     pts_bbox_head=dict(
         loss_heatmap=dict(

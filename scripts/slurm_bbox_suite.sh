@@ -73,6 +73,9 @@ echo "======================================================" | tee -a "${logfil
 # Use a unique port per array task to avoid torchrun conflicts on shared nodes
 export PORT=$((29520 + SLURM_ARRAY_TASK_ID))
 
+# Give dist_train.sh a unique workdir timestamp so simultaneous tasks never collide
+export DIST_TRAIN_TIMESTAMP="$(date +"%Y%m%d_%H%M%S")_j${SLURM_ARRAY_JOB_ID}_t${SLURM_ARRAY_TASK_ID}"
+
 source activate ssiai_adv
 bash scripts/dist_train.sh "${CONFIG}" 4 --work-dir "${WORK_DIR}" >> "${logfile}" 2>&1
 

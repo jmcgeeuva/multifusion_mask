@@ -73,7 +73,25 @@ def list_stats(val_dataset, outputs, cfg):
     ]:
         eval_kwargs.pop(key, None)
     eval_kwargs.update(dict(metric='bbox'))
-    print(val_dataset.evaluate(outputs, **eval_kwargs))
+    result = val_dataset.evaluate(outputs, **eval_kwargs)
+    print(result)
+    return result
+
+
+def save_if_best(eval_result, best_mAP, camou_para1, camou_para, work_dir):
+    mAP = next((v for k, v in eval_result.items() if 'mAP' in k), None)
+    if mAP is None:
+        return best_mAP
+    if mAP > best_mAP:
+        camou_png = cv2.cvtColor(
+            (camou_para1[0].detach().cpu().numpy() * 255).astype(np.uint8),
+            cv2.COLOR_RGB2BGR
+        )
+        cv2.imwrite(os.path.join(work_dir, 'best_camou.png'), camou_png)
+        np.save(os.path.join(work_dir, 'best_camou.npy'), camou_para.detach().cpu().numpy())
+        print(f'[Best] New best mAP: {mAP:.4f} (prev {best_mAP:.4f}), saved best_camou')
+        return mAP
+    return best_mAP
 
 def train_attack(
     model, 
@@ -112,7 +130,7 @@ def train_attack(
 
     #####################################################################################
     # continuous color
-    if cfg.camou_path is not None:
+    if cfg.get('camou_path', None) is not None:
         camou_para, camou_para1 = load_camou(cfg.camou_path, expand_kernel, device=device)
         begin_para = camou_para.detach().clone()
     else:
@@ -135,7 +153,7 @@ def train_attack(
         tmpdir = os.path.join('./tmp', f'tmp_{timestamp}', 'pkl')
         os.makedirs(tmpdir, exist_ok=True)
         tmpdir = os.path.join(tmpdir, 'out.pkl')
-        outputs = test_attack(
+        outputs, _ = test_attack(
             model=model,
             no_attack=True,
             yolo_model=yolo_model,
@@ -164,6 +182,26 @@ def train_attack(
 
     underlying = model.module if hasattr(model, 'module') else model
     underlying.detach = False
+    best_mAP = float('-inf')
+
+    _debug_file = None
+    _grad_file = None
+    _grad_step = 0
+    if cfg.get('debug', False) and work_dir is not None:
+        _debug_path = os.path.join(work_dir, f'train_debug_rank{rank}.txt')
+        _debug_file = open(_debug_path, 'a', buffering=1)
+
+        _grad_path = os.path.join(work_dir, f'texture_grad_rank{rank}.tsv')
+        needs_header = not os.path.exists(_grad_path)
+        _grad_file = open(_grad_path, 'a', buffering=1)
+        if needs_header:
+            _grad_file.write('step\tepoch\tgrad_norm\tgrad_mean_abs\tgrad_max_abs\tgrad_norm_r\tgrad_norm_g\tgrad_norm_b\n')
+
+    def dprint(msg):
+        # print(msg)
+        if _debug_file is not None:
+            _debug_file.write(msg + '\n')
+
     for epoch in range(max_epochs):
         model.train()
         running_loss = 0
@@ -220,33 +258,38 @@ def train_attack(
             giad_sum = torch.stack(giad_losses).sum(dim=0)
             catk_sum = torch.stack(catk_losses).sum(dim=0)
             batk_sum = torch.stack(batk_losses).sum(dim=0)
-            loss_tensor = giad_sum + catk_sum + batk_sum
+            loss_tensor =  giad_sum + catk_sum + batk_sum
             loss_tensor = loss_tensor + cfg.lambda_smooth*(loss_smooth(camou_para))
             loss_tensor = loss_tensor + cfg.lambda_nps*(loss_nps(camou_para, color_set))
             loss_tensor.backward()
+            print(camou_para.requires_grad)
+            print(camou_para.is_leaf)
+            print(camou_para.grad is None)
 
             # Optional debug logging for individual GIAD sub-components.
             # When loss_heatmap type is GIADLoss, the head adds
             # 'loss_giad_*' keys to the losses dict automatically.
             if cfg.get('debug', False):
-                print(f"loss_heatmap: {losses.get('loss_heatmap', None)}")
-                print(f"loss_heatmap_ins: {losses.get('loss_heatmap_ins', None)}")
-                print(f"matched_ious: {losses.get('matched_ious', None)}")
+                if _debug_file is not None:
+                    _debug_file.write(f'--- epoch={epoch} ---\n')
+                dprint(f"loss_heatmap: {losses.get('loss_heatmap', None)}")
+                dprint(f"loss_heatmap_ins: {losses.get('loss_heatmap_ins', None)}")
+                dprint(f"matched_ious: {losses.get('matched_ious', None)}")
                 if giad_keys:
                     parts = '  '.join(
                         f'{k}={losses[k].item():.4f}' for k in sorted(giad_keys)
                     )
-                    print(f'[GIAD] {parts}, sum: {giad_sum}')
+                    dprint(f'[GIAD] {parts}, sum: {giad_sum}')
                 if catk_keys:
                     parts = '  '.join(
                         f'{k}={losses[k].item():.4f}' for k in sorted(catk_keys)
                     )
-                    print(f'[ClassAttack] {parts}, sum: {catk_sum}')
+                    dprint(f'[ClassAttack] {parts}, sum: {catk_sum}')
                 if batk_keys:
                     parts = '  '.join(
                         f'{k}={losses[k].item():.4f}' for k in sorted(batk_keys)
                     )
-                    print(f'[BBoxAttack] {parts}, sum: {batk_sum}')
+                    dprint(f'[BBoxAttack] {parts}, sum: {batk_sum}')
 
             # Want to increase the error
             # FIXME NON-ADVERSARIAL CAN BE TESTED HERE BY REMOVING "2 -" and making it a loss minimization problem
@@ -266,6 +309,18 @@ def train_attack(
                     camou_para.grad = torch.zeros_like(camou_para)
                 dist.all_reduce(camou_para.grad.data, op=dist.ReduceOp.SUM)
                 camou_para.grad.data /= world_size
+            if cfg.get('debug', False) and _grad_file is not None and camou_para.grad is not None:
+                g = camou_para.grad  # shape [1, h, w, 3]
+                _grad_file.write(
+                    f'{_grad_step}\t{epoch}\t'
+                    f'{g.norm().item():.6f}\t'
+                    f'{g.abs().mean().item():.6f}\t'
+                    f'{g.abs().max().item():.6f}\t'
+                    f'{g[0, :, :, 0].norm().item():.6f}\t'
+                    f'{g[0, :, :, 1].norm().item():.6f}\t'
+                    f'{g[0, :, :, 2].norm().item():.6f}\n'
+                )
+                _grad_step += 1
             running_loss += loss_tensor.item()
             optimizer.step()
             camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
@@ -288,22 +343,22 @@ def train_attack(
 
         if cfg.freq != 0:
             if epoch % cfg.freq == 0:
-                # run validation
-                outputs = test_attack(
+                outputs, attack_log = test_attack(
                     model=model,
                     no_attack=False,
-                    yolo_model=yolo_model, 
+                    yolo_model=yolo_model,
                     tex_trans=tex_trans,
                     data_loader=val_loader,
                     camou_para1=camou_para1,
-                    allowed_words=allowed_words, 
+                    allowed_words=allowed_words,
                     tmpdir=tmpdir,
-                    gpu_collect=False, 
+                    gpu_collect=False,
                     cfg=cfg
                 )
 
                 if rank == 0:
-                    list_stats(val_dataset, outputs, cfg)
+                    eval_result = list_stats(val_dataset, outputs, cfg)
+                    best_mAP = save_if_best(eval_result, best_mAP, camou_para1, camou_para, work_dir)
 
 
 def parse_args():
@@ -504,6 +559,9 @@ def load_model(cfg, args, dataset):
 
 def main():
     args = parse_args()
+
+    if args.log_dir:
+        os.environ['ATTACK_LOG_DIR'] = args.log_dir
 
     cfg = Config.fromfile(args.config)
     logger = setup(args, cfg)
