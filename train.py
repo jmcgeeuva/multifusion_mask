@@ -180,7 +180,6 @@ def train_attack(
             batch_size = imgs.shape[0]
             camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
             learned_camou = mask_imgs(
-                yolo_model,
                 imgs,
                 mask_img,
                 camou_trans,
@@ -575,6 +574,10 @@ def main():
         val_loader_noatk = val_loader
     
     model = load_model(cfg, args, datasets)
+    underlying = model.module if hasattr(model, 'module') else model
+    for m in underlying.modules():
+        if hasattr(m, 'with_cp'):
+            m.with_cp = False
     logger.info(f'Model:\n{model}')
     logger = get_root_logger(cfg.log_level)
     

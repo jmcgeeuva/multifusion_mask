@@ -56,33 +56,35 @@ class Stack(object):
 
 class Repeat(object):
     def __init__(self, t=6):
-        self.t = 6
+        self.t = t
 
     def __call__(self, data):
         return data.repeat(self.t*self.t, 1, 1, 1)
 
 class Tile(object):
     def __init__(self, t=6):
-        self.t = 6
+        self.t = t
 
     def __call__(self, data):
         B, C, H, W = data.shape
-        assert math.sqrt(B) == self.t 
+        assert math.sqrt(B) == self.t
         x1 = data.view(self.t, self.t, C, H, W)
         x1 = x1.permute(0, 2, 1, 3, 4)
-        x1 = x1.reshape(self.t, C, 6*H, W)
+        x1 = x1.reshape(self.t, C, self.t*H, W)
         x2 = x1.permute(1, 2, 0, 3)
         x2 = x2.reshape(C, H*self.t, W*self.t)
         return x2.unsqueeze(0)
 
 def get_augmentation(size):
+    # t=2 gives a 2×2 tile grid (2112×2112 canvas) instead of 6×6 (6336×6336),
+    # reducing intermediate GPU tensor size from ~940 MB to ~105 MB per step.
     unique = transforms.Compose(
         [
-            Repeat(t=6),
+            Repeat(t=2),
             RandomHorizontalFlip(p=0.5),
             RandomVerticalFlip(p=0.5),
             RandomRotate(p=0.5, angle=90),
-            Tile(t=6),
+            Tile(t=2),
             RandomCrop(size)
         ]
     )

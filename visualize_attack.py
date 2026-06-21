@@ -343,6 +343,85 @@ def find_attacked_gt_box(info, atk_cls_name, bbox_2d, lidar2img, img_shape):
     return cls_boxes[best_idx:best_idx + 1]  # (1, 7)
 
 
+# ─── all-views grid ──────────────────────────────────────────────────────────
+
+def render_all_views_grid(
+        info, data_root,
+        b_boxes, b_scores, b_labels,
+        a_boxes, a_scores, a_labels,
+        atk_cam_idx, atk_cls_name, atk_label,
+        attacked_gt_corners_3d,
+        score_thr):
+    """Return a stacked image with one row per camera (baseline | attack).
+
+    The attacked camera row is highlighted with an orange border and label.
+    """
+    rows = []
+    for cam_i, cam_name in enumerate(CAM_CHANNELS):
+        cam_info = info['cams'][cam_name]
+
+        rel_path = cam_info['data_path']
+        for _prefix in ('./data/nuscenes/', 'data/nuscenes/'):
+            if rel_path.startswith(_prefix):
+                rel_path = rel_path[len(_prefix):]
+                break
+        img_path = os.path.join(data_root, rel_path)
+        raw_img = cv2.imread(img_path)
+        if raw_img is None:
+            raw_img = np.zeros((384, 1056, 3), dtype=np.uint8)
+            cv2.putText(raw_img, f'[MISSING] {cam_name}',
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
+                        (100, 100, 100), 2)
+
+        lidar2img = get_lidar2img(cam_info)
+        is_attacked = (cam_i == atk_cam_idx)
+
+        # Only draw the attacked GT box on the camera that was actually attacked
+        gt_corners = attacked_gt_corners_3d if is_attacked else None
+
+        b_panel = render_detections_on_img(
+            raw_img, b_boxes, b_scores, b_labels,
+            lidar2img, score_thr,
+            default_color=BASELINE_COLOR,
+            highlight_label=atk_label,
+            highlight_color=HIGHLIGHT_COLOR,
+            attacked_gt_corners=gt_corners,
+        )
+        a_panel = render_detections_on_img(
+            raw_img, a_boxes, a_scores, a_labels,
+            lidar2img, score_thr,
+            default_color=ATTACK_COLOR,
+            highlight_label=atk_label,
+            highlight_color=HIGHLIGHT_COLOR,
+            attacked_gt_corners=gt_corners,
+        )
+
+        h, w = raw_img.shape[:2]
+        strip_h = 30
+        atk_flag = '  ◄ ATTACKED' if is_attacked else ''
+        for panel, side_label, text_color in [
+                (b_panel, 'BASELINE', BASELINE_COLOR),
+                (a_panel, 'ATTACK',   ATTACK_COLOR)]:
+            strip = np.zeros((strip_h, w, 3), dtype=np.uint8)
+            if is_attacked:
+                strip[:] = (0, 40, 60)   # dark teal tint for attacked camera rows
+            cv2.putText(strip,
+                        f'{side_label} | {cam_name}{atk_flag}',
+                        (8, 22), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, text_color, 1, cv2.LINE_AA)
+            panel[:] = np.vstack([strip, panel[strip_h:]])
+
+        # Orange border around attacked camera panels
+        if is_attacked:
+            ORANGE = (0, 165, 255)
+            cv2.rectangle(b_panel, (0, 0), (w - 1, h - 1), ORANGE, 4)
+            cv2.rectangle(a_panel, (0, 0), (w - 1, h - 1), ORANGE, 4)
+
+        rows.append(np.hstack([b_panel, a_panel]))
+
+    return np.vstack(rows)
+
+
 # ─── main ────────────────────────────────────────────────────────────────────
 
 def parse_args():
@@ -363,6 +442,16 @@ def parse_args():
                    help='Render only this specific sample token')
     p.add_argument('--bev', action='store_true',
                    help='Also write a BEV comparison image per sample')
+    p.add_argument('--all-views', action='store_true',
+                   help='Also write a grid image showing all 6 camera views '
+                        '(baseline | attack) for each sample, not just the '
+                        'attacked camera')
+    p.add_argument('--baseline-token-order', default=None,
+                   help='Optional path to a text file listing sample tokens '
+                        'one-per-line in the order they appear in the baseline '
+                        'pkl.  Use this when the baseline was produced from a '
+                        'different evaluation run so its positional index does '
+                        'not match data_infos order.')
     return p.parse_args()
 
 
@@ -388,6 +477,42 @@ def main():
     token_to_idx = build_token_index(data_infos)
     print(f'  {len(data_infos)} samples indexed, '
           f'{len(attack_log)} tokens in attack log')
+
+    # ── baseline index remapping ───────────────────────────────────────────
+    # baseline_results[i] is valid only when its i-th entry corresponds to
+    # data_infos[i].  If the baseline pkl was generated from a differently-
+    # ordered or differently-sized dataset, the positional index is wrong.
+    #
+    # Detect the mismatch via length check and optionally remap with an
+    # explicit token-order file (--baseline-token-order).
+    baseline_token_to_idx = None  # None → use the same data_infos index
+    if args.baseline_token_order:
+        with open(args.baseline_token_order) as f:
+            b_tokens = [line.strip() for line in f if line.strip()]
+        baseline_token_to_idx = {tok: i for i, tok in enumerate(b_tokens)}
+        print(f'  Loaded baseline token order: {len(b_tokens)} entries '
+              f'from {args.baseline_token_order}')
+        if len(b_tokens) != len(baseline_results):
+            print(f'  WARNING: baseline token order file has {len(b_tokens)} '
+                  f'tokens but baseline pkl has {len(baseline_results)} results. '
+                  f'Counts should match.')
+    else:
+        n_base = len(baseline_results)
+        n_info = len(data_infos)
+        if n_base != n_info:
+            print(
+                f'\n  *** INDEX MISMATCH WARNING ***\n'
+                f'  baseline_results has {n_base} entries but data_infos has '
+                f'{n_info} entries.\n'
+                f'  baseline_results[idx] will map to the WRONG sample for most '
+                f'tokens.\n'
+                f'  This is the likely cause of misaligned baseline projections.\n'
+                f'  Fix: re-run the baseline evaluation using the same val dataset '
+                f'as the attack, or supply --baseline-token-order with a file '
+                f'listing the tokens in the order they appear in the baseline pkl.\n'
+            )
+        else:
+            print(f'  baseline ({n_base}) and data_infos ({n_info}) lengths match ✓')
 
     tokens = [args.token] if args.token else list(attack_log.keys())
     tokens = [t for t in tokens if t in token_to_idx]
@@ -432,7 +557,18 @@ def main():
         if attacked_gt_box is not None:
             attacked_gt_corners_3d = gt_box_corners(attacked_gt_box)[0]  # (8, 3)
 
-        b_boxes, b_scores, b_labels = extract_boxes(baseline_results[idx])
+        # Use the remapped baseline index when a token-order file was supplied;
+        # otherwise fall back to the same positional index used for attack.
+        if baseline_token_to_idx is not None:
+            b_idx = baseline_token_to_idx.get(token)
+            if b_idx is None:
+                print(f'  [skip baseline] token {token[:16]} not in '
+                      f'--baseline-token-order file')
+                b_idx = idx   # fall back so the rest of the loop still runs
+        else:
+            b_idx = idx
+
+        b_boxes, b_scores, b_labels = extract_boxes(baseline_results[b_idx])
         a_boxes, a_scores, a_labels = extract_boxes(attack_results[idx])
 
         baseline_img = render_detections_on_img(
@@ -456,7 +592,8 @@ def main():
         h, w = raw_img.shape[:2]
         for panel_img, label, color in [
                 (baseline_img, 'BASELINE', BASELINE_COLOR),
-                (attack_img,   'ATTACK',   ATTACK_COLOR)]:
+                (attack_img,   'ATTACK',   ATTACK_COLOR)
+            ]:
             strip = np.zeros((strip_h, w, 3), dtype=np.uint8)
             cv2.putText(strip,
                         f'{label}  |  {cam_name}  |  attacked: {atk_cls_name}  |  thr={args.score_thr}',
@@ -480,11 +617,34 @@ def main():
         cv2.putText(footer, footer_txt, (8, 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1, cv2.LINE_AA)
 
-        side_by_side = np.hstack([baseline_img, attack_img])
-        final = np.vstack([side_by_side, footer])
+        side_by_side = np.hstack([
+            baseline_img, 
+            attack_img
+        ])
+        final = np.vstack([
+            side_by_side, 
+            footer
+            ])
 
         out_path = os.path.join(args.out_dir, f'{sample_num:04d}_{token[:16]}_{cam_name}.jpg')
         cv2.imwrite(out_path, final, [cv2.IMWRITE_JPEG_QUALITY, 92])
+
+        if args.all_views:
+            all_views_img = render_all_views_grid(
+                info, args.data_root,
+                b_boxes, b_scores, b_labels,
+                a_boxes, a_scores, a_labels,
+                atk_cam_idx=cam_idx,
+                atk_cls_name=atk_cls_name,
+                atk_label=atk_label,
+                attacked_gt_corners_3d=attacked_gt_corners_3d,
+                score_thr=args.score_thr,
+            )
+            all_views_path = os.path.join(
+                args.out_dir,
+                f'{sample_num:04d}_{token[:16]}_all_views.jpg')
+            cv2.imwrite(all_views_path, all_views_img,
+                        [cv2.IMWRITE_JPEG_QUALITY, 92])
 
         if args.bev:
             bev_gt = attacked_gt_box[0] if attacked_gt_box is not None else None
