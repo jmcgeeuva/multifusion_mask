@@ -7,7 +7,7 @@ class_names = [
 ################################ ATTACK VARIABLES ####################################
 checkpoint='./pretrained_models/IS-Fusion_epoch_10.pth'
 debug = False
-max_epochs=1000
+max_epochs=10
 camou_path="./workdir/20251111_215729/2camou.npy"
 
 ################# ablation ###################
@@ -17,10 +17,7 @@ allowed_words='./nuscenes_words.txt'
 target_class='car'  # nuScenes class name logged in the attack log for filtering
 dynamic_ratio=False
 area_ratio=0.002
-gamma_heatmap = 1
-gamma_cls = 0
-gamma_bbox = 0
-lr=0.01
+lr=1.0e-3
 ##############################################
 
 color_map=[
@@ -175,6 +172,7 @@ model = dict(
             score_threshold=0.0,
             code_size=10,
         ),
+        # NOTE: heatmap = True is the SSIAI model
         loss_cls=dict(
             type='ClassAttackLoss',
             use_sigmoid=True,
@@ -185,19 +183,17 @@ model = dict(
             debug=False,
 
             # ── toggle each component ──────────────────────────────────────
-            use_original_focal=True,      # standard FocalLoss baseline
-            use_reverse_focal=False,      # −FocalLoss: maximise cls loss directly
-            use_complement_loss=False,    # −log(1−p_y): push correct class down
-            use_uniform_confusion=False,  # BCE toward uniform wrong-class target
-            use_margin_confusion=False,   # relu(z_y − z_wrong + margin): attack decision boundary
-            use_hard_wrong_class=False,   # −log(p_wrong): boost hardest wrong class
-
-            # ── relative weight of each enabled component ──────────────────
+            use_original_focal=False,      # standard FocalLoss baseline
             lambda_original=1.0,
+            use_reverse_focal=False,      # −FocalLoss: maximise cls loss directly
             lambda_reverse=1.0,
+            use_complement_loss=False,    # −log(1−p_y): push correct class down
             lambda_complement=1.0,
+            use_uniform_confusion=False,  # BCE toward uniform wrong-class target
             lambda_uniform=1.0,
+            use_margin_confusion=False,   # relu(z_y − z_wrong + margin): attack decision boundary
             lambda_margin=1.0,
+            use_hard_wrong_class=False,   # −log(p_wrong): boost hardest wrong class
             lambda_hard_wrong=1.0,
 
             # ── tuning ─────────────────────────────────────────────────────
@@ -211,19 +207,17 @@ model = dict(
             debug=False,
 
             # ── toggle each component ──────────────────────────────────────
-            use_original_l1=True,          # standard L1 baseline
-            use_reverse_l1=False,          # −L1: maximise regression error directly
-            use_translation_attack=False,  # −||centre_pred − centre_gt||: push centre away
-            use_orbit_attack=False,        # L1(centre_pred, centre_gt + r*rand_dir): orbital target
-            use_scale_attack=False,        # −||dims_pred − dims_gt||: corrupt log(w,l,h)
-            use_orientation_attack=False,  # cos(yaw_pred − yaw_gt): maximise angular error
-
-            # ── relative weight of each enabled component ──────────────────
+            use_original_l1=False,          # standard L1 baseline
             lambda_original=1.0,
+            use_reverse_l1=False,          # −L1: maximise regression error directly
             lambda_reverse=1.0,
+            use_translation_attack=False,  # −||centre_pred − centre_gt||: push centre away
             lambda_translation=1.0,
+            use_orbit_attack=False,        # L1(centre_pred, centre_gt + r*rand_dir): orbital target
             lambda_orbit=1.0,
+            use_scale_attack=False,        # −||dims_pred − dims_gt||: corrupt log(w,l,h)
             lambda_scale=1.0,
+            use_orientation_attack=False,  # cos(yaw_pred − yaw_gt): maximise angular error
             lambda_orientation=1.0,
 
             # ── tuning ─────────────────────────────────────────────────────
@@ -238,21 +232,21 @@ model = dict(
             debug=False,
 
             # ── toggle each component ──────────────────────────────────────
-            use_original_gaussian_loss=True,
+            use_original_gaussian_loss=False,
+            lambda_original=0.0,
+            use_reverse_gaussian_loss=False,
+            lambda_reverse=1.0,
             use_ring_loss=False,
-            use_attention_diffusion=False,
-            use_entropy_loss=False,
-            use_contrast_loss=False,
-            use_veiling_luminance=False,
-
-            # ── relative weight of each enabled component ──────────────────
-            lambda_original=1.0,
             lambda_ring=1.0,
-            lambda_diffusion=1.0,
+            use_attention_diffusion=True,
+            lambda_diffusion=1000.0,
+            use_entropy_loss=False,
             lambda_entropy=1.0,
+            use_contrast_loss=False,
             lambda_contrast=1.0,
+            use_veiling_luminance=False,
             lambda_veiling=1.0,
-
+     
             # ── kernel tuning ─────────────────────────────────────────────
             ring_radius=3.0,
             ring_sigma=1.0,
@@ -476,8 +470,8 @@ test_pipeline = [
 ]
 
 data = dict(
-    samples_per_gpu=1,
-    workers_per_gpu=1,
+    samples_per_gpu=2,
+    workers_per_gpu=6,
     train=dict(
         type='CBGSDataset',
         # type='SimpleDataset',
@@ -496,6 +490,7 @@ data = dict(
             # and box_type_3d='Depth' in sunrgbd and scannet dataset.
             box_type_3d='LiDAR',
             img_num=6,
+            split_file='./nuscenes_infos_train_05pct.txt',
             load_interval=1)
     ),
     val=dict(
@@ -508,6 +503,7 @@ data = dict(
         modality=input_modality,
         test_mode=True,
         img_num=6,
+        split_file='./nuscenes_infos_val_05pct.txt',
         box_type_3d='LiDAR'),
     test=dict(
         type=dataset_type,
@@ -519,7 +515,9 @@ data = dict(
         modality=input_modality,
         test_mode=True,
         img_num=6,
-        box_type_3d='LiDAR'))
+        box_type_3d='LiDAR',
+        split_file='./nuscenes_infos_val_05pct.txt'
+    ))
 
 
 optimizer = dict(type='AdamW', lr=0.0001, weight_decay=0.01, paramwise_cfg=dict(

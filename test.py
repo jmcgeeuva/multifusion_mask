@@ -92,7 +92,6 @@ def mask_imgs(imgs, mask_img, camou_para, allowed_words, device, num_samples = 1
     min_num = imgs.min()
     imgs_norm = (imgs - min_num) / (range_num)
 
-    raise ValueError(camou_para.device)
     imgs_overlayed = overlay_image(imgs_norm, mask_img, camou_para.permute(0, 3, 1, 2))
     imgs_processed = (imgs_overlayed * range_num) + min_num
 

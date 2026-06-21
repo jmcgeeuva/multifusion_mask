@@ -168,7 +168,7 @@ def train_attack(
         model.train()
         running_loss = 0
         if rank == 0:
-            prog_bar = mmcv.ProgressBar(len(dataset))
+            prog_bar = mmcv.ProgressBar(len(train_loaders))
         time.sleep(2)  # This line can prevent deadlock problem in some cases.
 
         for data in train_loaders: 
@@ -211,59 +211,67 @@ def train_attack(
                         ]
 
             losses = model(return_loss=True, **data)
-            heatmap_loss = cfg.gamma_heatmap * losses['loss_heatmap']
-            cls_loss     = cfg.gamma_cls     * losses['layer_-1_loss_cls']
-            bbox_loss    = cfg.gamma_bbox    * losses['layer_-1_loss_bbox']
-
-            loss_tensor = heatmap_loss + cls_loss + bbox_loss
+            giad_keys = [k for k in losses if k.startswith('loss_giad_')]
+            catk_keys = [k for k in losses if k.startswith('layer_-1_loss_catk_')]
+            batk_keys = [k for k in losses if k.startswith('layer_-1_loss_batk_')]
+            giad_losses = [losses[k] for k in losses if k.startswith('loss_giad_')]
+            catk_losses = [losses[k] for k in losses if k.startswith('layer_-1_loss_catk_')]
+            batk_losses = [losses[k] for k in losses if k.startswith('layer_-1_loss_batk_')]
+            giad_sum = torch.stack(giad_losses).sum(dim=0)
+            catk_sum = torch.stack(catk_losses).sum(dim=0)
+            batk_sum = torch.stack(batk_losses).sum(dim=0)
+            loss_tensor = giad_sum + catk_sum + batk_sum
+            loss_tensor = loss_tensor + cfg.lambda_smooth*(loss_smooth(camou_para))
+            loss_tensor = loss_tensor + cfg.lambda_nps*(loss_nps(camou_para, color_set))
+            loss_tensor.backward()
 
             # Optional debug logging for individual GIAD sub-components.
             # When loss_heatmap type is GIADLoss, the head adds
             # 'loss_giad_*' keys to the losses dict automatically.
             if cfg.get('debug', False):
-                giad_keys = [k for k in losses if k.startswith('loss_giad_')]
+                print(f"loss_heatmap: {losses.get('loss_heatmap', None)}")
+                print(f"loss_heatmap_ins: {losses.get('loss_heatmap_ins', None)}")
+                print(f"matched_ious: {losses.get('matched_ious', None)}")
                 if giad_keys:
                     parts = '  '.join(
                         f'{k}={losses[k].item():.4f}' for k in sorted(giad_keys)
                     )
-                    print(f'[GIAD] {parts}')
-                catk_keys = [k for k in losses if k.startswith('layer_-1_loss_catk_')]
+                    print(f'[GIAD] {parts}, sum: {giad_sum}')
                 if catk_keys:
                     parts = '  '.join(
                         f'{k}={losses[k].item():.4f}' for k in sorted(catk_keys)
                     )
-                    print(f'[ClassAttack] {parts}')
-                batk_keys = [k for k in losses if k.startswith('layer_-1_loss_batk_')]
+                    print(f'[ClassAttack] {parts}, sum: {catk_sum}')
                 if batk_keys:
                     parts = '  '.join(
                         f'{k}={losses[k].item():.4f}' for k in sorted(batk_keys)
                     )
-                    print(f'[BBoxAttack] {parts}')
+                    print(f'[BBoxAttack] {parts}, sum: {batk_sum}')
 
             # Want to increase the error
             # FIXME NON-ADVERSARIAL CAN BE TESTED HERE BY REMOVING "2 -" and making it a loss minimization problem
-            non_adv = True
-            if not non_adv:
-                total_loss = cfg.lambda_reduce * (2 - loss_tensor)
-            else:
-                total_loss = cfg.lambda_reduce * loss_tensor
+            # non_adv = True
+            # if not non_adv:
+            #     total_loss = cfg.lambda_reduce * (2 - loss_tensor)
+            # else:
+            #     total_loss = cfg.lambda_reduce * loss_tensor
             # Smoothing of the camouflage
-            total_loss = total_loss + cfg.lambda_smooth*(loss_smooth(camou_para))
-            total_loss = total_loss + cfg.lambda_nps*(loss_nps(camou_para, color_set))
-            total_loss.backward()
             # Average camou_para gradients across all ranks so every rank
             # applies the same optimizer update and textures stay in sync.
-            if cfg.distributed and camou_para.grad is not None:
+            if cfg.distributed:
+                # Use a zero tensor as a stand-in when this rank had no mask
+                # coverage so that dist.all_reduce (a collective) is always
+                # called by every rank and the job never hangs.
+                if camou_para.grad is None:
+                    camou_para.grad = torch.zeros_like(camou_para)
                 dist.all_reduce(camou_para.grad.data, op=dist.ReduceOp.SUM)
                 camou_para.grad.data /= world_size
-            running_loss += total_loss.item()
+            running_loss += loss_tensor.item()
             optimizer.step()
             camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
             camou_para1 = torch.clamp(camou_para1, 0, 1)
             if rank == 0:
-                batch_size = imgs.shape[0]
-                for _ in range(batch_size * world_size):
-                    prog_bar.update()
+                prog_bar.update()
         camou_png = cv2.cvtColor((camou_para1[0].detach().cpu().numpy()*255).astype(np.uint8), cv2.COLOR_RGB2BGR)
         if cfg.distributed:
             loss_t = torch.tensor(running_loss, device=device)
