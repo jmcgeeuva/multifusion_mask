@@ -1,17 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=ablation_cls
-#SBATCH --time=2-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=20
-#SBATCH --mem=100G
+#SBATCH --mem=60G
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:a40:2
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #SBATCH -A eng_viva
 #SBATCH --mail-type=begin,end
 #SBATCH --mail-user=tkg5kq@virginia.edu
 #SBATCH --array=0-5%6
+#SBATCH --exclude=udc-aw37-1,udc-aw37-6,udc-aw37-10,udc-aw37-14,udc-aw38-2,udc-aw38-6,udc-aw38-10,udc-ba11-3,udc-ba11-7,udc-ba11-11,udc-ba11-15,udc-ba11-19,udc-ba11-23,udc-ba11-27,udc-an25-20,udc-an25-24,udc-an38-1,udc-an38-5,udc-an38-9,udc-an38-13,udc-an38-17,udc-an38-25,udc-an38-29,udc-an38-33,udc-an40-13,udc-an40-17,udc-an40-25,udc-an40-29
 
 # Classification (ClassAttackLoss) ablation suite
 # classification0: baseline (original focal)
@@ -77,6 +78,6 @@ export PORT=$((29510 + SLURM_ARRAY_TASK_ID))
 export DIST_TRAIN_TIMESTAMP="$(date +"%Y%m%d_%H%M%S")_j${SLURM_ARRAY_JOB_ID}_t${SLURM_ARRAY_TASK_ID}"
 
 source activate ssiai_adv
-bash scripts/dist_train.sh "${CONFIG}" 4 --work-dir "${WORK_DIR}" >> "${logfile}" 2>&1
+bash scripts/dist_train.sh "${CONFIG}" 2 --work-dir "${WORK_DIR}" >> "${logfile}" 2>&1
 
 echo "Done: $(date)" | tee -a "${logfile}"

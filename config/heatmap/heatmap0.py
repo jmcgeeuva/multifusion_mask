@@ -5,6 +5,8 @@
 
 _base_ = ['../only_vehicles.py']
 
+debug = True
+lr = .7
 # camou_path="./workdir/20251111_215729/2camou.npy"
 model = dict(
     pts_bbox_head=dict(
@@ -30,3 +32,4 @@ model = dict(
 )
 
 work_dir = 'work_dirs/heatmap/heatmap0'
+seed = 777

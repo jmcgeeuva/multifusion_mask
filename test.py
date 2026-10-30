@@ -316,7 +316,6 @@ def test_attack(model, yolo_model, data_loader, camou_para1, tex_trans, no_attac
                 mask_img = data['masks'][0].data[0].to(_device)
                 _img_metas = data['img_metas'][0].data[0]
                 learned_img, attack_meta = mask_imgs(
-                    yolo_model, 
                     imgs, 
                     mask_img, 
                     camou_trans, 

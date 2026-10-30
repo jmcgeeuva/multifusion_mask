@@ -184,40 +184,42 @@ def train_attack(
     underlying.detach = False
     best_mAP = float('-inf')
 
-    _debug_file = None
+    # _debug_file = None
     _grad_file = None
     _grad_step = 0
+    _grad_needs_header = False
     if cfg.get('debug', False) and work_dir is not None:
-        _debug_path = os.path.join(work_dir, f'train_debug_rank{rank}.txt')
-        _debug_file = open(_debug_path, 'a', buffering=1)
+        # _debug_path = os.path.join(work_dir, f'train_debug_rank{rank}.txt')
+        # _debug_file = open(_debug_path, 'a', buffering=1)
 
         _grad_path = os.path.join(work_dir, f'texture_grad_rank{rank}.tsv')
-        needs_header = not os.path.exists(_grad_path)
+        _grad_needs_header = not os.path.exists(_grad_path)
         _grad_file = open(_grad_path, 'a', buffering=1)
-        if needs_header:
-            _grad_file.write('step\tepoch\tgrad_norm\tgrad_mean_abs\tgrad_max_abs\tgrad_norm_r\tgrad_norm_g\tgrad_norm_b\n')
 
-    def dprint(msg):
-        # print(msg)
-        if _debug_file is not None:
-            _debug_file.write(msg + '\n')
+    # def dprint(msg):
+    #     # print(msg)
+    #     if _debug_file is not None:
+    #         _debug_file.write(msg + '\n')
 
     for epoch in range(max_epochs):
         model.train()
         running_loss = 0
+        _viz_done_this_epoch = False
+        if hasattr(train_loaders.sampler, 'set_epoch'):
+            train_loaders.sampler.set_epoch(epoch)
         if rank == 0:
             prog_bar = mmcv.ProgressBar(len(train_loaders))
         time.sleep(2)  # This line can prevent deadlock problem in some cases.
 
-        for data in train_loaders: 
+        for data in train_loaders:
             optimizer.zero_grad(set_to_none=True)
-            
+
             imgs = data['img'].data[0].to(device)
             mask_img = data['masks'].data[0].to(device)
             _img_metas = data['img_metas'].data[0]
             batch_size = imgs.shape[0]
             camou_trans = tex_trans(camou_para1.permute(0, 3, 1, 2))
-            learned_camou = mask_imgs(
+            learned_camou, _batch_attack_meta = mask_imgs(
                 imgs,
                 mask_img,
                 camou_trans,
@@ -229,7 +231,56 @@ def train_attack(
                 debug=cfg.debug,
                 target_class=getattr(cfg, 'target_class', None),
                 img_metas=_img_metas,
-            )[0]
+            )
+            _batch_obj_count = sum(1 for m in _batch_attack_meta if m is not None)
+            _batch_size = len(_batch_attack_meta)
+
+            if cfg.get('debug', False) and rank == 0 and not _viz_done_this_epoch:
+                _viz_dir = os.path.join(work_dir, 'debug_views')
+                os.makedirs(_viz_dir, exist_ok=True)
+                _t = learned_camou[0].data[0].detach().cpu().float()
+                _s = _t[0]  # [N_cams, 3, H, W]
+                n_cams = _s.shape[0]
+                cols = min(n_cams, 3)
+                rows = (n_cams + cols - 1) // cols
+                fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4), squeeze=False)
+                for ci in range(n_cams):
+                    v = _s[ci]  # [3, H, W]
+                    v = (v - v.min()) / (v.max() - v.min() + 1e-8)
+                    axes[ci // cols][ci % cols].imshow(v.permute(1, 2, 0).numpy())
+                    axes[ci // cols][ci % cols].set_title(f'Cam {ci}')
+                    axes[ci // cols][ci % cols].axis('off')
+                for ci in range(n_cams, rows * cols):
+                    axes[ci // cols][ci % cols].set_visible(False)
+                plt.suptitle(f'Epoch {epoch}', fontsize=14)
+                plt.tight_layout()
+                plt.savefig(os.path.join(_viz_dir, f'epoch{epoch:04d}.png'), dpi=80, bbox_inches='tight')
+                plt.close(fig)
+                _viz_done_this_epoch = True
+
+            _debug_step = cfg.get('debug_step', None)
+            if _debug_step is not None and _grad_step in _debug_step:
+                _viz_dir = os.path.join(work_dir, 'debug_views')
+                os.makedirs(_viz_dir, exist_ok=True)
+                _t = learned_camou[0].data[0].detach().cpu().float()
+                _s = _t[0]  # [N_cams, 3, H, W]
+                n_cams = _s.shape[0]
+                cols = min(n_cams, 3)
+                rows = (n_cams + cols - 1) // cols
+                fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4), squeeze=False)
+                for ci in range(n_cams):
+                    v = _s[ci]  # [3, H, W]
+                    v = (v - v.min()) / (v.max() - v.min() + 1e-8)
+                    axes[ci // cols][ci % cols].imshow(v.permute(1, 2, 0).numpy())
+                    axes[ci // cols][ci % cols].set_title(f'Cam {ci}')
+                    axes[ci // cols][ci % cols].axis('off')
+                for ci in range(n_cams, rows * cols):
+                    axes[ci // cols][ci % cols].set_visible(False)
+                plt.suptitle(f'Step {_grad_step} mask debug  obj_count={_batch_obj_count}', fontsize=14)
+                plt.tight_layout()
+                plt.savefig(os.path.join(_viz_dir, f'step{_grad_step:05d}_mask_debug_{rank}.png'), dpi=80, bbox_inches='tight')
+                plt.close(fig)
+                print(f'[debug_step] saved mask debug for step {_grad_step} → {_viz_dir}')
 
             data['img'] = learned_camou
             # Move all remaining DC-wrapped tensors to the model's device.
@@ -250,46 +301,49 @@ def train_attack(
 
             losses = model(return_loss=True, **data)
             giad_keys = [k for k in losses if k.startswith('loss_giad_')]
-            catk_keys = [k for k in losses if k.startswith('layer_-1_loss_catk_')]
-            batk_keys = [k for k in losses if k.startswith('layer_-1_loss_batk_')]
             giad_losses = [losses[k] for k in losses if k.startswith('loss_giad_')]
+            giad_sum = torch.stack(giad_losses).sum()
+
+            catk_keys = [k for k in losses if k.startswith('layer_-1_loss_catk_')]
             catk_losses = [losses[k] for k in losses if k.startswith('layer_-1_loss_catk_')]
+            catk_sum = torch.stack(catk_losses).sum()
+
+            batk_keys = [k for k in losses if k.startswith('layer_-1_loss_batk_')]
             batk_losses = [losses[k] for k in losses if k.startswith('layer_-1_loss_batk_')]
-            giad_sum = torch.stack(giad_losses).sum(dim=0)
-            catk_sum = torch.stack(catk_losses).sum(dim=0)
-            batk_sum = torch.stack(batk_losses).sum(dim=0)
+            batk_sum = torch.stack(batk_losses).sum()
+
             loss_tensor =  giad_sum + catk_sum + batk_sum
             loss_tensor = loss_tensor + cfg.lambda_smooth*(loss_smooth(camou_para))
             loss_tensor = loss_tensor + cfg.lambda_nps*(loss_nps(camou_para, color_set))
             loss_tensor.backward()
-            print(camou_para.requires_grad)
-            print(camou_para.is_leaf)
-            print(camou_para.grad is None)
+            # print(camou_para.requires_grad)
+            # print(camou_para.is_leaf)
+            # print(camou_para.grad is None)
 
             # Optional debug logging for individual GIAD sub-components.
             # When loss_heatmap type is GIADLoss, the head adds
             # 'loss_giad_*' keys to the losses dict automatically.
             if cfg.get('debug', False):
-                if _debug_file is not None:
-                    _debug_file.write(f'--- epoch={epoch} ---\n')
-                dprint(f"loss_heatmap: {losses.get('loss_heatmap', None)}")
-                dprint(f"loss_heatmap_ins: {losses.get('loss_heatmap_ins', None)}")
-                dprint(f"matched_ious: {losses.get('matched_ious', None)}")
+                # if _debug_file is not None:
+                #     _debug_file.write(f'--- epoch={epoch} ---\n')
+                print(f"loss_heatmap: {losses.get('loss_heatmap', None)}")
+                print(f"loss_heatmap_ins: {losses.get('loss_heatmap_ins', None)}")
+                print(f"matched_ious: {losses.get('matched_ious', None)}")
                 if giad_keys:
                     parts = '  '.join(
                         f'{k}={losses[k].item():.4f}' for k in sorted(giad_keys)
                     )
-                    dprint(f'[GIAD] {parts}, sum: {giad_sum}')
+                    print(f'[GIAD] {parts}, sum: {giad_sum}')
                 if catk_keys:
                     parts = '  '.join(
                         f'{k}={losses[k].item():.4f}' for k in sorted(catk_keys)
                     )
-                    dprint(f'[ClassAttack] {parts}, sum: {catk_sum}')
+                    print(f'[ClassAttack] {parts}, sum: {catk_sum}')
                 if batk_keys:
                     parts = '  '.join(
                         f'{k}={losses[k].item():.4f}' for k in sorted(batk_keys)
                     )
-                    dprint(f'[BBoxAttack] {parts}, sum: {batk_sum}')
+                    print(f'[BBoxAttack] {parts}, sum: {batk_sum}')
 
             # Want to increase the error
             # FIXME NON-ADVERSARIAL CAN BE TESTED HERE BY REMOVING "2 -" and making it a loss minimization problem
@@ -307,10 +361,39 @@ def train_attack(
                 # called by every rank and the job never hangs.
                 if camou_para.grad is None:
                     camou_para.grad = torch.zeros_like(camou_para)
+                    
+                # rank = dist.get_rank()
+
+                # if camou_para.grad is not None:
+                #     print(
+                #         rank,
+                #         camou_para.grad.norm().item(),
+                #         camou_para.grad.abs().mean().item(),
+                #     )
                 dist.all_reduce(camou_para.grad.data, op=dist.ReduceOp.SUM)
-                camou_para.grad.data /= world_size
+                # print(
+                #     rank,
+                #     "after",
+                #     camou_para.grad.norm().item(),
+                #     camou_para.grad.abs().mean().item(),
+                # )
+                # camou_para.grad.data /= world_size
             if cfg.get('debug', False) and _grad_file is not None and camou_para.grad is not None:
                 g = camou_para.grad  # shape [1, h, w, 3]
+                B_cur = len(_batch_attack_meta)
+                if _grad_needs_header:
+                    obj_cols = '\t'.join(f'obj_size_{i}' for i in range(B_cur))
+                    _grad_file.write(
+                        f'step\tepoch\tgrad_norm\tgrad_mean_abs\tgrad_max_abs\t'
+                        f'grad_norm_r\tgrad_norm_g\tgrad_norm_b\t{obj_cols}\tobj_count\n'
+                    )
+                    _grad_needs_header = False
+                def _obj_size(meta):
+                    if meta is None:
+                        return 'n/a'
+                    x1, y1, x2, y2 = meta['bbox_2d']
+                    return str((x2 - x1) * (y2 - y1))
+                obj_sizes = '\t'.join(_obj_size(m) for m in _batch_attack_meta)
                 _grad_file.write(
                     f'{_grad_step}\t{epoch}\t'
                     f'{g.norm().item():.6f}\t'
@@ -318,13 +401,18 @@ def train_attack(
                     f'{g.abs().max().item():.6f}\t'
                     f'{g[0, :, :, 0].norm().item():.6f}\t'
                     f'{g[0, :, :, 1].norm().item():.6f}\t'
-                    f'{g[0, :, :, 2].norm().item():.6f}\n'
+                    f'{g[0, :, :, 2].norm().item():.6f}\t'
+                    f'{obj_sizes}\t'
+                    f'{_batch_obj_count}\n'
                 )
                 _grad_step += 1
             running_loss += loss_tensor.item()
             optimizer.step()
+            with torch.no_grad():
+                camou_para.clamp_(0, 1)
             camou_para1 = expand_kernel(camou_para.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
-            camou_para1 = torch.clamp(camou_para1, 0, 1)
+            # print(camou_para1.min())
+            # print(camou_para1.max())
             if rank == 0:
                 prog_bar.update()
         camou_png = cv2.cvtColor((camou_para1[0].detach().cpu().numpy()*255).astype(np.uint8), cv2.COLOR_RGB2BGR)
@@ -510,18 +598,20 @@ def setup(args, cfg):
         _, world_size = get_dist_info()
         cfg.gpu_ids = range(world_size)
     
-    # set random seeds
-    if args.seed is not None:
-        logger.info(f'Set random seed to {args.seed}, '
+    # set random seeds — priority: CLI --seed > cfg.seed > random
+    seed = args.seed if args.seed is not None else cfg.get('seed', None)
+    if seed is not None:
+        logger.info(f'Set random seed to {seed}, '
                     f'deterministic: {args.deterministic}')
-        set_random_seed(args.seed, deterministic=args.deterministic)
+        set_random_seed(seed, deterministic=args.deterministic)
     else:
         import random
-        args.seed = int(random.random()*10e7)
-        logger.info(f'Set random seed to {args.seed}, '
+        seed = int(random.random()*10e7)
+        logger.info(f'Set random seed to {seed}, '
                     f'deterministic: {args.deterministic}')
-        set_random_seed(args.seed, deterministic=args.deterministic)
-    cfg.seed = args.seed
+        set_random_seed(seed, deterministic=args.deterministic)
+    args.seed = seed
+    cfg.seed = seed
     return logger
 
 def load_words(file_name):

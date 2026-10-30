@@ -5,6 +5,8 @@
 
 _base_ = ['../only_vehicles.py']
 
+debug = True
+lr = .7
 model = dict(
     pts_bbox_head=dict(
         loss_bbox=dict(
@@ -44,3 +46,4 @@ model = dict(
 )
 
 work_dir = 'work_dirs/bbox/bbox5'
+seed = 777

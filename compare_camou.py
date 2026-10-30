@@ -104,7 +104,7 @@ def main():
         print(f"\n  Figure saved to: {args.save}")
     else:
         plt.tight_layout()
-        plt.show()
+        plt.savefig('compare_out.png')
 
 
 if __name__ == '__main__':

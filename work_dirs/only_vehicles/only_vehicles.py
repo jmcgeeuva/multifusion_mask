@@ -3,16 +3,15 @@ class_names = [
     'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
 ]
 checkpoint = './pretrained_models/IS-Fusion_epoch_10.pth'
-debug = True
-max_epochs = 1000
-camou_path = './workdir/20251111_215729/2camou.npy'
+debug = False
+max_epochs = 10
 freq = 0
 num_samples = 1
 allowed_words = './nuscenes_words.txt'
 target_class = 'car'
 dynamic_ratio = False
 area_ratio = 0.002
-lr = 0.01
+lr = 0.07
 color_map = [[0, 0, 0], [255, 255, 255], [0, 18, 79], [5, 80, 214],
              [71, 178, 243], [178, 159, 211], [77, 58, 0], [211, 191, 167],
              [247, 110, 26], [110, 76, 16]]
@@ -185,13 +184,13 @@ model = dict(
             loss_weight=1.0,
             debug=False,
             use_original_gaussian_loss=False,
-            lambda_original=0.0,
+            lambda_original=1.0,
             use_reverse_gaussian_loss=False,
             lambda_reverse=1.0,
             use_ring_loss=False,
             lambda_ring=1.0,
-            use_attention_diffusion=True,
-            lambda_diffusion=1000.0,
+            use_attention_diffusion=False,
+            lambda_diffusion=1.0,
             use_entropy_loss=False,
             lambda_entropy=1.0,
             use_contrast_loss=False,
@@ -471,7 +470,7 @@ test_pipeline = [
 ]
 data = dict(
     samples_per_gpu=2,
-    workers_per_gpu=6,
+    workers_per_gpu=4,
     train=dict(
         type='CBGSDataset',
         dataset=dict(

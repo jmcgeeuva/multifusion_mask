@@ -5,6 +5,8 @@
 
 _base_ = ['../only_vehicles.py']
 
+debug = True
+lr = .7
 model = dict(
     pts_bbox_head=dict(
         loss_heatmap=dict(
@@ -29,3 +31,4 @@ model = dict(
 )
 
 work_dir = 'work_dirs/heatmap/heatmap3'
+seed = 777

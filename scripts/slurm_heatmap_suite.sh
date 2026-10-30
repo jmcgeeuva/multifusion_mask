@@ -5,7 +5,7 @@
 #SBATCH --ntasks=20
 #SBATCH --mem=60G
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:a40:2
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #SBATCH -A eng_viva
