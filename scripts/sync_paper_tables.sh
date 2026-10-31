@@ -11,5 +11,7 @@ DEST=paper_overleaf/experiments/generated          # paper_overleaf is the symli
 mkdir -p "$DEST"
 mv -f "$STAGE"/*.tex "$DEST"/
 rmdir "$STAGE" 2>/dev/null || true
+# official nuScenes AP/NDS table (separate: reads the full-val official_*.json dumps)
+"$PY" tools/official_table.py --tex "$DEST/official.tex" >/dev/null || echo "WARN: official_table skipped (no official_*.json yet)"
 echo "moved generated tables -> $DEST"
 ls -1 "$DEST"
