@@ -88,6 +88,19 @@ def instance_masks(meta, aug_mats, hw, index, vehicles, mode, pipeline_mask):
     return out
 
 
+def subsample_masks(ins, k, fname, seed):
+    """Keep a deterministic random k of the vehicle instance masks (for the N-vehicle sweep).
+
+    Seeded by (scene filename, run seed, k) so it is reproducible, stable across the clean/eval
+    passes of one run, and varies across seeds (so 3 seeds give genuine which-vehicles variation)."""
+    import zlib
+    if not k or len(ins) <= k:
+        return ins
+    key = (zlib.crc32(fname.encode()) + 1000003 * seed + 104729 * k) % (2 ** 32)
+    sel = sorted(np.random.RandomState(key).choice(len(ins), k, replace=False).tolist())
+    return [ins[i] for i in sel]
+
+
 def patch_rect(mask, frac, on_vehicle):
     """Shrink a [H,W] bool instance mask to a centered square patch of `frac` of its 2D-box area."""
     ys, xs = torch.nonzero(mask, as_tuple=True)
@@ -215,6 +228,65 @@ def render(bank, imgs, insts_per_sample, assign, param=None, train=False):
 def head_outputs(head_out, P):
     res = head_out[0][0] if isinstance(head_out[0], (list, tuple)) else head_out[0]
     return res['dense_heatmap'], res['heatmap'][..., -P:], res['center'][..., -P:]
+
+
+def denorm_display(t, mean, std):
+    """Model-input image tensor [N,3,H,W] -> uint8 [N,H,W,3] for display (channels as loaded, BGR).
+
+    The pipeline is ToTensor (scales to [0,1]) then Normalize(mean,std), so the inverse is
+    (t*std + mean) in [0,1], scaled back to 0-255."""
+    m = torch.tensor(mean, device=t.device).view(1, 3, 1, 1)
+    s = torch.tensor(std, device=t.device).view(1, 3, 1, 1)
+    return (t * s + m).clamp(0, 1).mul(255).round().byte().permute(0, 2, 3, 1).cpu().numpy()
+
+
+def decode_dets(det, head_o, metas, score_thr):
+    """Decode captured head outputs into final NMS detections for batch item 0."""
+    with torch.no_grad():
+        bbox_list = det.pts_bbox_head.get_bboxes(head_o, metas, rescale=False)
+    bboxes, scores, labels = bbox_list[0]
+    boxes = bboxes.tensor.detach().cpu().numpy()
+    scores = scores.detach().cpu().numpy()
+    labels = labels.detach().cpu().numpy()
+    keep = scores >= score_thr
+    return dict(boxes=boxes[keep], scores=scores[keep], labels=labels[keep])
+
+
+def make_dump_entry(idx, h, clean_t, atk_t, clean_det, atk_det, metas, mkey, place):
+    """One figure-bundle record: display images + calib + GT + clean/attacked detections."""
+    nc = metas[0].get('img_norm_cfg', dict(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
+    mean, std = nc['mean'], nc['std']
+    def disp(t):
+        t = t.reshape(-1, *t.shape[-3:])          # [B,N,3,H,W] or [N,3,H,W] -> [N,3,H,W]
+        return denorm_display(t, mean, std)
+    data = h['data']
+    gt = data['gt_bboxes_3d'].data[0][0]
+    pts = data['points'].data[0][0].detach().cpu().numpy()[:, :3].astype(np.float32)
+    def _np(x):
+        return x.detach().cpu().numpy().astype(np.float32) if torch.is_tensor(x) else np.asarray(x, np.float32)
+    return dict(
+        scene=int(idx), file=h.get('file'), place=place, channels='bgr',
+        img_clean=disp(clean_t), img_attack=disp(atk_t),
+        # raw calibration; projection to the (augmented) display image mirrors grad_check.project_centres
+        lidar2img=_np(data['lidar2img'].data[0][0]),          # [Ncam,4,4]
+        img_aug=_np(data['img_aug_matrix'].data[0][0]),       # [Ncam,4,4]
+        lidar_aug=_np(data['lidar_aug_matrix'].data[0][0]),   # [4,4]
+        cam_files=[osp.basename(f) for f in metas[0].get('filename', [])],
+        points=pts,
+        gt_boxes=gt.tensor.detach().cpu().numpy().astype(np.float32),
+        gt_labels=np.asarray(h['data']['gt_labels_3d'].data[0][0].detach().cpu().numpy()),
+        attacked_gt=list(map(int, h['tg'][mkey])),
+        pred_clean=clean_det, pred_attack=atk_det,
+    )
+
+
+def write_dump(dump, path, logf=print):
+    if not path or not dump:
+        return
+    import pickle as _pk
+    with open(path, 'wb') as fh:
+        _pk.dump(dump, fh)
+    logf(f'[dump] wrote {len(dump)} scene(s) -> {path}')
 
 
 def _agg(z, form, k):
@@ -369,6 +441,9 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--mode', choices=['universal', 'perscene', 'perseq'], default='universal')
     ap.add_argument('--mask', choices=['all', 'single'], default='all')
+    ap.add_argument('--paint-n', type=int, default=0,
+                    help='with --mask all: randomly paint only N vehicles per scene (0 = every vehicle). '
+                         'Deterministic per (scene, seed); use for the N-vehicle ghost dose-response.')
     ap.add_argument('--bank', type=int, default=1, help='number of textures (1 = one shared texture)')
     ap.add_argument('--cell', type=int, default=8, help='texture cell size in pixels')
     ap.add_argument('--vehicles', default='car,truck,bus')
@@ -412,9 +487,19 @@ def main():
     ap.add_argument('--no-patch-on-vehicle', dest='patch_on_vehicle', action='store_false')
     ap.add_argument('--ablate', choices=['none', 'instance_fusion'], default='none',
                     help='instance_fusion: run IS-Fusion instance->scene attention but discard its effect\n                          on the scene features (keep its instance heatmap so losses stay valid)')
+    # figure dump (default off): decoded clean/attacked detections + display images for chosen scenes
+    ap.add_argument('--dump', default=None, help='write a figure bundle .pkl (clean/attacked boxes, images, calib)')
+    ap.add_argument('--dump-scenes', default='', help='comma-separated held-out scene indices to dump')
+    ap.add_argument('--dump-score-thr', type=float, default=0.2, help='min score to keep a detection in the dump')
+    # official nuScenes metrics (default off): mAP / NDS / per-class AP, clean and (with --load-bank) attacked
+    ap.add_argument('--official-eval', action='store_true',
+                    help='run the full-val nuScenes evaluator (clean, and attacked if --load-bank given), then exit')
+    ap.add_argument('--official-max', type=int, default=0, help='cap frames for a smoke (0 = whole val split)')
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     t0 = time.time()
+    DUMP = []
+    dump_scenes = {int(x) for x in args.dump_scenes.split(',') if x.strip()}
     vehicles = [v.strip() for v in args.vehicles.split(',') if v.strip()]
     vehicle_ids = {G.CLASS_NAMES.index(v) for v in vehicles if v in G.CLASS_NAMES}
     LC = dict(form=args.vanish_form, k_dense=args.k_dense, k_prop=args.k_prop, margin_cap=args.margin_cap)
@@ -493,6 +578,7 @@ def main():
         ins_all = instance_masks(meta, aug, hw, index, vehicles, 'all', None)
         if not ins_all:
             return None
+        ins_all = subsample_masks(ins_all, args.paint_n, meta['filename'][0], args.seed)   # N-vehicle sweep
         ins_one = instance_masks(meta, aug, hw, index, vehicles, 'single', data['masks'].data[0][0])
         G.to_device(data, device)
         ins_all = [(c, m.to(device)) for c, m in ins_all]
@@ -587,6 +673,26 @@ def main():
                 for r, v in zip(recs[mkey][i], score(i, h, imgs, mkey, tag)):
                     r[f'{tag}'] = round(v, 4)
 
+    def dump_universal(bank):
+        if not args.dump or not dump_scenes:
+            return
+        mkey = args.mask
+        with torch.no_grad():
+            for i in sorted(dump_scenes):
+                if i >= len(held) or not held[i]['tg'][mkey]:
+                    continue
+                h = held[i]
+                metas = h['data']['img_metas'].data[0]
+                G.seed_all(1000 + i)
+                atk = render(bank, h['imgs'], [h['ins'][mkey]],
+                             [assign_eval(i, len(h['ins'][mkey]), bank.k)])
+                clean_imgs = render(bank, h['imgs'], [[]], [[]])
+                clean_det = decode_dets(det, forward(h['data'], clean_imgs), metas, args.dump_score_thr)
+                atk_det = decode_dets(det, forward(h['data'], atk), metas, args.dump_score_thr)
+                DUMP.append(make_dump_entry(i, h, clean_imgs[0].data[0], atk[0].data[0],
+                                            clean_det, atk_det, metas, mkey, args.place))
+                log(f'[dump] scene {i}: {len(clean_det["scores"])} clean -> {len(atk_det["scores"])} attacked dets')
+
     recs = {mk: [records_for(i, h, mk) for i, h in enumerate(held)] for mk in ('all', 'single')}
     FP_ACC['clean'] = []
     with torch.no_grad():
@@ -616,6 +722,70 @@ def main():
                   open(osp.join(args.out, 'eval.json'), 'w'), indent=1)
         line = {mk: {k: (v['all'] or {}) for k, v in summ[mk].items()} for mk in summ}
         log(f'[eval step {step}] ' + json.dumps(line) + ' | collateral ' + json.dumps(collat) + (' | ghosts ' + json.dumps(extra.get('false_positives', {}).get('learned', {})) if args.fp_eval else ''))
+
+    # ------------------------------------------------ official nuScenes metrics (mAP / NDS / per-class AP)
+    if args.official_eval:
+        from mmdet3d.core.bbox import LiDARInstance3DBoxes
+        mkey = args.mask
+        obank = Bank(args.bank, args.cell, 1056, device, tex_trans, seed=args.seed)
+        if args.load_bank:
+            loaded = torch.from_numpy(np.load(args.load_bank)).to(device)
+            assert loaded.shape == obank.param.shape, (loaded.shape, obank.param.shape)
+            obank.param.data.copy_(loaded)
+            log(f'official: loaded bank {args.load_bank}')
+
+        def _empty_res():
+            return dict(pts_bbox=dict(boxes_3d=LiDARInstance3DBoxes(torch.zeros((0, 9)), box_dim=9),
+                                      scores_3d=torch.zeros(0), labels_3d=torch.zeros(0).long()))
+
+        def collect(attacked):
+            results, t1 = [], time.time()
+            for n, data in enumerate(held_loader):
+                if args.official_max and n >= args.official_max:
+                    break
+                metas = data['img_metas'].data[0]
+                insts = []
+                if attacked:
+                    hw = tuple(data['masks'].data[0].shape[-2:])
+                    aug = data['img_aug_matrix'].data[0][0].numpy()
+                    insts = instance_masks(metas[0], aug, hw, index, vehicles, mkey, data['masks'].data[0][0])
+                G.to_device(data, device)
+                imgs0 = data['img'].data[0].to(device)
+                if attacked and insts:
+                    insts = [(c, m.to(device)) for c, m in insts]
+                    if args.attack == 'patch':
+                        insts = to_patch(insts, args.patch_frac, args.patch_on_vehicle)
+                    G.seed_all(1000 + n)
+                    imgs = render(obank, imgs0, [insts], [assign_eval(n, len(insts), obank.k)])
+                else:
+                    imgs = render(obank, imgs0, [[]], [[]])
+                with torch.no_grad():
+                    d = decode_dets(det, forward(data, imgs), metas, 0.0)
+                bd = d['boxes'].shape[1] if len(d['boxes']) else 9
+                bx = LiDARInstance3DBoxes(torch.from_numpy(np.asarray(d['boxes'], np.float32)).reshape(-1, bd),
+                                          box_dim=bd)
+                results.append(dict(pts_bbox=dict(
+                    boxes_3d=bx,
+                    scores_3d=torch.from_numpy(np.asarray(d['scores'], np.float32)),
+                    labels_3d=torch.from_numpy(np.asarray(d['labels'])).long())))
+                if n % 500 == 0:
+                    log(f'[official {"attack" if attacked else "clean"}] {n}/{len(held_set)} | {time.time()-t1:.0f}s')
+            while len(results) < len(held_set):          # pad (smoke with --official-max) so tokens align
+                results.append(_empty_res())
+            return results
+
+        # one pass per job: --load-bank -> attacked metrics; no bank -> clean baseline (seed-independent)
+        for tag, attacked in ([('attack', True)] if args.load_bank else [('clean', False)]):
+            metrics = held_set.evaluate(collect(attacked), metric='bbox')
+            out = {k: (float(v) if isinstance(v, (int, float, np.floating)) else str(v)) for k, v in metrics.items()}
+            path = osp.join(args.out, f'official_{tag}.json')
+            json.dump(out, open(path, 'w'), indent=1)
+            nds = [k for k in out if k.endswith('NDS')]
+            maP = [k for k in out if k.endswith('mAP')]
+            log(f'[official {tag}] -> {path}'
+                + (f' | NDS {out[nds[0]]:.4f}' if nds else '')
+                + (f' | mAP {out[maP[0]]:.4f}' if maP else ''))
+        return
 
     # ------------------------------------------------ per-scene upper bound
     if args.mode == 'perscene':
@@ -654,6 +824,15 @@ def main():
                 imgs = render(bank, h['imgs'], [h['ins'][mkey]], [assign_eval(i, len(h['ins'][mkey]), bank.k)])
                 for r, v in zip(recs[mkey][i], score(i, h, imgs, mkey, 'learned')):
                     r['learned'] = round(v, 4)
+            if args.dump and i in dump_scenes:
+                with torch.no_grad():
+                    metas = h['data']['img_metas'].data[0]
+                    clean_imgs = render(bank, h['imgs'], [[]], [[]])        # no paste -> clean image, model format
+                    clean_det = decode_dets(det, forward(h['data'], clean_imgs), metas, args.dump_score_thr)
+                    atk_det = decode_dets(det, forward(h['data'], imgs), metas, args.dump_score_thr)
+                    DUMP.append(make_dump_entry(i, h, clean_imgs[0].data[0], imgs[0].data[0],
+                                                clean_det, atk_det, metas, mkey, args.place))
+                log(f'[dump] scene {i}: {len(clean_det["scores"])} clean -> {len(atk_det["scores"])} attacked dets')
             cl = np.mean([r['clean'] for r in recs[mkey][i] if r['targeted']])
             le = np.mean([r['learned'] for r in recs[mkey][i] if r['targeted']])
             log(f'[scene {i}] {len(recs[mkey][i])} vehicles | loss {first:.3f} -> {last:.3f} | '
@@ -661,6 +840,7 @@ def main():
             if i % 5 == 4:
                 report(i)
         report('final')
+        write_dump(DUMP, args.dump, log)
         return
 
     # ------------------------------------------------ per-sequence: first half of a drive -> second half
@@ -668,6 +848,7 @@ def main():
         from collections import defaultdict
         from mmcv.parallel import collate
         mkey = args.mask
+        G.seed_all(args.seed)                     # full-pipeline seed: global RNG for render() jitter/shift
         logs = defaultdict(list)
         for idx, inf in enumerate(held_set.data_infos):
             name = osp.basename(inf['lidar_path']).split('__')[0]
@@ -688,7 +869,7 @@ def main():
                 continue
             bank = Bank(args.bank, args.cell, 1056, device, tex_trans, seed=args.seed + li)
             opt = optim.Adam([bank.param], lr=args.perscene_lr)
-            rs = np.random.RandomState(li)
+            rs = np.random.RandomState(li + 100003 * args.seed)  # full-pipeline seed: frame sampling + texture assignment vary with --seed
             n_up = max(1, args.seq_steps // args.grad_accum)
             losses = []
             for s_ in range(args.seq_steps):
@@ -756,6 +937,8 @@ def main():
     if args.steps == 0:
         eval_universal(bank, 'learned', recs)
         report('rescored')
+        dump_universal(bank)
+        write_dump(DUMP, args.dump, log)
         return
     report(0)
     rng = np.random.RandomState(args.seed)
@@ -821,6 +1004,8 @@ def main():
                 break
         epoch += 1
     log(f'done: {step} steps, {skipped} batches skipped, {time.time()-t0:.0f}s')
+    dump_universal(bank)
+    write_dump(DUMP, args.dump, log)
 
 
 if __name__ == '__main__':

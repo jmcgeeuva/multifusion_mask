@@ -25,5 +25,5 @@ ARGS=("--mode perseq --place bbox --seq-logs 6 --seq-steps 300 --perscene-lr 0.0
       "--mode universal --place bbox --grad-accum 4 --lr 0.03 --lr-sched cosine --bank 4")
 i=${SLURM_ARRAY_TASK_ID:-0}; N=${NAMES[$i]}
 echo "=== job ${SLURM_ARRAY_JOB_ID}_${i} $N $(hostname) $(nvidia-smi --query-gpu=name --format=csv,noheader)"
-$PY attack_multi.py "$C" --out "logs/attack/${SLURM_ARRAY_JOB_ID}/$N" $COMMON ${ARGS[$i]}
+$PY attack_multi.py "$C" --out "logs/attack/${SLURM_ARRAY_JOB_ID}_s${SEED:-0}/$N" --seed "${SEED:-0}" $COMMON ${ARGS[$i]}
 echo "=== $N exit $?"

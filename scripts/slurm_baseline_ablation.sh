@@ -27,5 +27,5 @@ ARGS=("--mode perscene --attack patch --patch-frac 0.2" \
       "--mode perscene --region-mode hull_saturate --w-region 1.0 --w-vanish 0 --fp-eval --ablate instance_fusion")
 i=${SLURM_ARRAY_TASK_ID:-0}; N=${NAMES[$i]}
 echo "=== job ${SLURM_ARRAY_JOB_ID}_${i} $N $(hostname) $(nvidia-smi --query-gpu=name --format=csv,noheader)"
-$PY attack_multi.py "$C" --out "logs/attack/${SLURM_ARRAY_JOB_ID}/$N" $BASE ${ARGS[$i]}
+$PY attack_multi.py "$C" --out "logs/attack/${SLURM_ARRAY_JOB_ID}_s${SEED:-0}/$N" --seed "${SEED:-0}" $BASE ${ARGS[$i]}
 echo "=== $N exit $?"
