@@ -55,8 +55,8 @@ def main():
     ext_lines = []  # (label, color, linestyle, marker, ns, mu, sd)
     if ext:
         for sub, lab, col, ls, mk in (
-                ('natreg', '+ naturalization', '#1f77b4', '--', '^'),
-                ('nonveh', '+ non-vehicles',   '#2ca02c', ':',  'D')):
+                ('natreg', 'vehicles + naturalization', '#1f77b4', '--', '^'),
+                ('nonveh', 'vehicles + non-vehicles',   '#2ca02c', ':',  'D')):
             d = os.path.join(ext, sub)
             if os.path.isdir(d):
                 bn = A.load_sweep(d)
@@ -66,7 +66,7 @@ def main():
 
     fig, ax = plt.subplots(figsize=(6.2, 4.4))
     ax.errorbar(ns, hr_mu, yerr=hr_sd, marker='o', ms=7, lw=2.4, capsize=4,
-                color='#b00000', label='vehicles', zorder=5)
+                color='#b00000', label='vehicles (baseline)', zorder=5)
     for lab, col, ls, mk, e_ns, e_mu, e_sd in ext_lines:
         ax.errorbar(e_ns, e_mu, yerr=e_sd, marker=mk, ms=6, lw=1.9, capsize=3,
                     color=col, ls=ls, label=lab)
@@ -83,7 +83,7 @@ def main():
                 xytext=(ns[0] + 0.3, hr_mu[0] + ymax * 0.1), fontsize=9,
                 arrowprops=dict(arrowstyle='->', color='0.3'))
     ax.set_xticks(ns)
-    ax.set_xlabel('number of painted vehicles  $N$', fontsize=11)
+    ax.set_xlabel('number of painted objects  $N$', fontsize=11)
     ax.set_ylabel('fabricated ghost detections / scene\n(attack $-$ clean)', fontsize=11)
     ax.set_title('Ghost fabrication is a multi-vehicle effect', fontsize=12)
     ax.grid(True, alpha=0.3)
