@@ -19,9 +19,9 @@ cd tools
 echo "fig1 ghosts   .."; $PY fig1_ghosts.py  --bundle ../$D/ghosts_strong.pkl --out ../$OUT/fig1_ghosts.png
 echo "fig2 hiding   .."; $PY fig2_hiding.py   --bundle ../$D/hide.pkl          --out ../$OUT/fig2_hiding.png
 echo "fig3 baselines.."; $PY fig3_baselines.py --scene 1 --out ../$OUT/fig3_baselines.png \
-    --bundle "Full texture:../$D/full.pkl"  --bundle "Patch 20%:../$D/patch20.pkl" \
-    --bundle "Patch 40%:../$D/patch40.pkl"  --bundle "Tile:../$D/tile.pkl" \
-    --bundle "Screen:../$D/screen.pkl"      --bundle "Random:../$D/random.pkl"
+    --bundle "Random:../$D/random.pkl"      --bundle "Tile:../$D/tile.pkl" \
+    --bundle "Screen:../$D/screen.pkl"      --bundle "Patch 20%:../$D/patch20.pkl" \
+    --bundle "Patch 40%:../$D/patch40.pkl"  --bundle "Ours:../$D/full.pkl"
 if [ -n "$NSWEEP" ]; then
   echo "fig4 dose-resp.."; $PY fig4_nsweep.py "../$NSWEEP" --out ../$OUT/fig4_nsweep.png --allref 10.3
 fi

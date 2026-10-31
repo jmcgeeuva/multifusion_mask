@@ -94,7 +94,8 @@ def main():
         acam = fig.add_subplot(gs[rc, col]); abev = fig.add_subplot(gs[rc + 1, col])
         img, c = F.draw_cam_semantic(e, cam, which, preds, gt, thr, ref=ref_pred)
         acam.imshow(img, aspect='auto'); acam.set_xticks([]); acam.set_yticks([])
-        acam.set_title(title, fontsize=10, pad=3)
+        weight = 'bold' if title.startswith('Ours') else 'normal'
+        acam.set_title(title, fontsize=10, pad=3, fontweight=weight)
         F.draw_bev(abev, e['points'], F.bev_semantic_sets(preds, gt, c), rng=46.0, axis_labels=False)
 
     for i, (title, e, which, preds, ref_pred) in enumerate(panels):
