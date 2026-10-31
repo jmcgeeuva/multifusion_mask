@@ -82,7 +82,7 @@ def main():
         rand = rr if rand is None else rand
 
     if args.metric == 'conf':
-        ylo, yhi = 0.2, 0.45
+        ylo, yhi = 0.25, 0.45
         if clean is not None and clean <= yhi:       # only draw refs that fall in view
             ax.axhline(clean, color='0.35', lw=1.3, ls='-')
             ax.text(ax.get_xlim()[1], clean, '  clean', va='center', ha='left',
