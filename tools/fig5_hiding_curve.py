@@ -82,22 +82,22 @@ def main():
         rand = rr if rand is None else rand
 
     if args.metric == 'conf':
-        if clean is not None:
+        ylo, yhi = 0.2, 0.45
+        if clean is not None and clean <= yhi:       # only draw refs that fall in view
             ax.axhline(clean, color='0.35', lw=1.3, ls='-')
             ax.text(ax.get_xlim()[1], clean, '  clean', va='center', ha='left',
                     fontsize=8.5, color='0.35')
-        if rand is not None:
+        if rand is not None and rand <= yhi:
             ax.axhline(rand, color='0.6', lw=1.1, ls=':')
             ax.text(ax.get_xlim()[1], rand, '  random texture', va='center', ha='left',
                     fontsize=8.5, color='0.6')
         ax.set_ylabel('held-out own-class confidence\non painted vehicles  (lower = stronger)',
                       fontsize=11)
-        ax.set_ylim(0.2, max(0.8, (clean or 0.76) + 0.02))
+        ax.set_ylim(ylo, yhi)
     else:
         ax.set_ylabel('held-out recall @ 0.3  (lower = stronger)', fontsize=11)
 
     ax.set_xlabel('optimization step', fontsize=11)
-    ax.set_title('Hiding deepens over training; naturalness is free', fontsize=12)
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=9, loc='upper right')
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
