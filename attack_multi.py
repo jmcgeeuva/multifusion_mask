@@ -165,10 +165,82 @@ class Bank:
         full = self.expand(param.permute(0, 3, 1, 2))            # [K,3,size,size]
         return [self.tex_trans(full[k:k + 1])[0].permute(2, 0, 1) for k in range(self.k)]
 
+    def full(self, param=None):
+        """Expanded texture [K,3,size,size] (the displayed pixels), differentiable in param."""
+        param = self.param if param is None else param
+        return self.expand(param.permute(0, 3, 1, 2))
+
     def png(self, path):
         full = self.expand(self.param.detach().permute(0, 3, 1, 2)).permute(0, 2, 3, 1).cpu().numpy()
         img = np.concatenate(list(full), axis=1) * 255
         cv2.imwrite(path, cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2BGR))
+
+
+class TextureReg:
+    """Naturalness regularizers on the adversarial texture (both default off, weight 0):
+      tv    : total variation (smoothness) of the expanded texture -- removes high-frequency noise.
+      style : VGG-19 Gram-matrix style loss toward a natural reference image, so the texture takes
+              on natural colour / texture statistics. Degrades gracefully to TV-only if VGG cannot
+              load (e.g. no cached weights on the node)."""
+    LAYERS = (1, 6, 11, 20)        # relu1_1, relu2_1, relu3_1, relu4_1 in vgg19.features
+    RES = 256                      # resolution for the (expensive) VGG path
+
+    def __init__(self, w_tv, w_style, device, vgg_path='assets/vgg19.pth'):
+        self.w_tv, self.w_style = float(w_tv), float(w_style)
+        self.device = device
+        self.vgg, self.targets = None, None
+        self._mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
+        self._std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
+        if self.w_style > 0:
+            try:
+                import torchvision.models as M
+                vgg = M.vgg19(pretrained=False)
+                vgg.load_state_dict(torch.load(vgg_path, map_location='cpu'))
+                self.vgg = vgg.features[:max(self.LAYERS) + 1].eval().to(device)
+                for p in self.vgg.parameters():
+                    p.requires_grad = False
+            except Exception as e:
+                print(f'[texreg] VGG style disabled ({str(e)[:90]}); using TV only')
+                self.vgg = None
+
+    def _feats(self, x01):
+        x = F.interpolate(x01.clamp(0, 1), size=self.RES, mode='bilinear', align_corners=False)
+        x = (x - self._mean) / self._std
+        out, h = [], x
+        for i, layer in enumerate(self.vgg):
+            h = layer(h)
+            if i in self.LAYERS:
+                out.append(h)
+        return out
+
+    @staticmethod
+    def _gram(f):
+        b, c, hh, ww = f.shape
+        g = f.reshape(b, c, hh * ww)
+        return g @ g.transpose(1, 2) / (c * hh * ww)
+
+    def ensure_ref(self, cam_img):
+        """Set the style target once from a natural image [3,H,W] (min-max scaled to [0,1])."""
+        if self.vgg is None or self.w_style <= 0 or self.targets is not None:
+            return
+        x = cam_img.detach().to(self.device).float()
+        x = (x - x.min()) / (x.max() - x.min() + 1e-6)
+        with torch.no_grad():
+            self.targets = [self._gram(f).detach() for f in self._feats(x[None])]
+
+    def active(self):
+        return self.w_tv > 0 or (self.vgg is not None and self.targets is not None)
+
+    def __call__(self, full):
+        loss = full.new_zeros(())
+        if self.w_tv > 0:
+            tv = (full[..., 1:, :] - full[..., :-1, :]).abs().mean() + \
+                 (full[..., :, 1:] - full[..., :, :-1]).abs().mean()
+            loss = loss + self.w_tv * tv
+        if self.vgg is not None and self.targets is not None:
+            st = sum(((self._gram(f) - t) ** 2).mean() for f, t in zip(self._feats(full), self.targets))
+            loss = loss + self.w_style * st
+        return loss
 
 
 def paste(imgs, insts_per_sample, tiles, assign):
@@ -495,13 +567,21 @@ def main():
     ap.add_argument('--official-eval', action='store_true',
                     help='run the full-val nuScenes evaluator (clean, and attacked if --load-bank given), then exit')
     ap.add_argument('--official-max', type=int, default=0, help='cap frames for a smoke (0 = whole val split)')
+    # texture naturalness regularizers (default off): make the camouflage look less conspicuous
+    ap.add_argument('--w-tv', type=float, default=0.0, help='total-variation (smoothness) weight on the texture')
+    ap.add_argument('--w-style', type=float, default=0.0, help='VGG-19 Gram style-loss weight toward a natural image')
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     t0 = time.time()
     DUMP = []
     dump_scenes = {int(x) for x in args.dump_scenes.split(',') if x.strip()}
-    vehicles = [v.strip() for v in args.vehicles.split(',') if v.strip()]
-    vehicle_ids = {G.CLASS_NAMES.index(v) for v in vehicles if v in G.CLASS_NAMES}
+    vehicles = [v.strip() for v in args.vehicles.split(',') if v.strip()]   # mask classes (COCO names)
+    # segmenter masks are COCO-named; detection GTs are nuScenes classes -> map so non-vehicle
+    # targets (person->pedestrian, bicycle, motorcycle) hit the right GT boxes.
+    COCO2NU = {'car': 'car', 'truck': 'truck', 'bus': 'bus', 'trailer': 'trailer',
+               'person': 'pedestrian', 'bicycle': 'bicycle', 'motorcycle': 'motorcycle'}
+    vehicle_ids = {G.CLASS_NAMES.index(COCO2NU[v]) for v in vehicles
+                   if v in COCO2NU and COCO2NU[v] in G.CLASS_NAMES}
     LC = dict(form=args.vanish_form, k_dense=args.k_dense, k_prop=args.k_prop, margin_cap=args.margin_cap)
     RC = dict(mode=args.region_mode, radius=args.region_radius, w=args.w_region)
     PLACE.update(mode=args.place, jitter=args.jitter, shift=args.shift)
@@ -511,6 +591,9 @@ def main():
     dist.init_process_group('nccl', rank=0, world_size=1)
     torch.cuda.set_device(0)
     device = torch.device('cuda:0')
+    texreg = TextureReg(args.w_tv, args.w_style, device=device)
+    if args.w_tv > 0 or args.w_style > 0:
+        print(f'[texreg] w_tv={args.w_tv} w_style={args.w_style} vgg={"on" if texreg.vgg is not None else "off"}', flush=True)
 
     cfg = Config.fromfile(args.config)
     cfg.distributed = True
@@ -813,6 +896,9 @@ def main():
                                             args.w_vanish, args.w_margin, lcfg=LC, rcfg=RC)
                 if loss is None:
                     break
+                texreg.ensure_ref(h['imgs'][0, 0])
+                if texreg.active():
+                    loss = loss + texreg(bank.full())
                 loss.backward()
                 opt.step()
                 with torch.no_grad():
@@ -880,6 +966,9 @@ def main():
                                         args.w_vanish, args.w_margin, lcfg=LC, rcfg=RC)
                 if loss is None:
                     continue
+                texreg.ensure_ref(h['imgs'][0, 0])
+                if texreg.active():
+                    loss = loss + texreg(bank.full())
                 (loss / args.grad_accum).backward()
                 losses.append(float(loss))
                 if (s_ + 1) % args.grad_accum == 0:
@@ -974,6 +1063,9 @@ def main():
             if loss is None:
                 skipped += 1
                 continue
+            texreg.ensure_ref(imgs[0, 0])
+            if texreg.active():
+                loss = loss + texreg(bank.full())
             (loss / args.grad_accum).backward()
             g = 0.0 if bank.param.grad is None else float(bank.param.grad.norm())
             step += 1
