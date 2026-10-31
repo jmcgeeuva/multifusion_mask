@@ -24,6 +24,6 @@ echo "=== task $T ${NAMES[$T]} classes='${CLS[$T]}' -> $OUT ; $(hostname)"
 $PY attack_multi.py "$C" --out "$OUT" \
     --mode perscene --mask all --cell 8 --inference-norm --place bbox \
     --vanish-form bce --k-dense 5 --k-prop 3 --w-margin 0 \
-    --heldout 40 --perscene-steps 100 --fp-eval \
+    --heldout 20 --perscene-steps 80 --fp-eval \
     --vehicles "${CLS[$T]}" --seed 0
 echo "=== rc $?"

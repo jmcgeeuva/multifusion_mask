@@ -25,6 +25,8 @@ def main():
     ap.add_argument('root', nargs='?', default=None)
     ap.add_argument('--base', default='/home/tkg5kq/workdir/av_project/multifusion_mask/logs/attack')
     ap.add_argument('--out', default='paper/figs/fig4_nsweep.png')
+    ap.add_argument('--ext', default=None,
+                    help='nsweepext_<JOB> dir with natreg/ and nonveh/ subdirs (extra condition lines)')
     ap.add_argument('--allref', type=float, default=None,
                     help='optional mask=all hull reference line (e.g. 10.3)')
     args = ap.parse_args()
@@ -32,27 +34,47 @@ def main():
     root = args.root
     if root is None:
         root = sorted(glob.glob(os.path.join(args.base, 'nsweep_*')), key=os.path.getmtime)[-1]
-    by_n = A.load_sweep(root)
 
-    ns = sorted(by_n)
-    def series(zone):
+    def hr_series(by_n):
+        """hull+ring mean/std over seeds, aligned to the sorted N present in this sweep."""
+        ns = sorted(by_n)
         mu, sd = [], []
         for n in ns:
-            vals = [by_n[n][s][zone] for s in by_n[n]]
+            vals = [by_n[n][s]['hull+ring'] for s in by_n[n]]
             mu.append(np.mean(vals)); sd.append(np.std(vals, ddof=1) if len(vals) > 1 else 0.0)
-        return np.array(mu), np.array(sd)
+        return ns, np.array(mu), np.array(sd)
 
-    hull_mu, hull_sd = series('hull')
-    hr_mu, hr_sd = series('hull+ring')
+    by_n = A.load_sweep(root)
+    ns, hr_mu, hr_sd = hr_series(by_n)
+
+    # optional extra condition lines; auto-pick newest nsweepext_* if --ext omitted
+    ext = args.ext
+    if ext is None:
+        cands = sorted(glob.glob(os.path.join(args.base, 'nsweepext_*')), key=os.path.getmtime)
+        ext = cands[-1] if cands else None
+    ext_lines = []  # (label, color, linestyle, marker, ns, mu, sd)
+    if ext:
+        for sub, lab, col, ls, mk in (
+                ('natreg', '+ naturalization', '#1f77b4', '--', '^'),
+                ('nonveh', '+ non-vehicles',   '#2ca02c', ':',  'D')):
+            d = os.path.join(ext, sub)
+            if os.path.isdir(d):
+                bn = A.load_sweep(d)
+                if bn:
+                    e_ns, e_mu, e_sd = hr_series(bn)
+                    ext_lines.append((lab, col, ls, mk, e_ns, e_mu, e_sd))
 
     fig, ax = plt.subplots(figsize=(6.2, 4.4))
-    ax.errorbar(ns, hr_mu, yerr=hr_sd, marker='o', ms=7, lw=2.2, capsize=4,
-                color='#b00000', label='in-hull + ring')
-    ax.errorbar(ns, hull_mu, yerr=hull_sd, marker='s', ms=6, lw=1.8, capsize=4,
-                color='#e08000', ls='--', label='in-hull only')
+    ax.errorbar(ns, hr_mu, yerr=hr_sd, marker='o', ms=7, lw=2.4, capsize=4,
+                color='#b00000', label='vehicles', zorder=5)
+    for lab, col, ls, mk, e_ns, e_mu, e_sd in ext_lines:
+        ax.errorbar(e_ns, e_mu, yerr=e_sd, marker=mk, ms=6, lw=1.9, capsize=3,
+                    color=col, ls=ls, label=lab)
     # tight y-scale 0 .. max+1 so the effect reads strongly
-    ymax = float(np.max(hr_mu + hr_sd)) + 1.0
-    ax.set_ylim(0, ymax)
+    allmax = [float(np.max(hr_mu + hr_sd))]
+    for *_, e_mu, e_sd in ext_lines:
+        allmax.append(float(np.max(e_mu + e_sd)))
+    ymax = max(allmax) + 1.0
     if args.allref:                                    # context note only, no line
         ax.text(0.985, 0.955, f'paint-all = {args.allref:.1f}', transform=ax.transAxes,
                 ha='right', va='top', fontsize=9, color='0.45')
