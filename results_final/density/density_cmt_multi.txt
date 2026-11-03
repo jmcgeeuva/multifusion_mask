@@ -1,0 +1,19 @@
+=== CMT (multi): LiDAR-sparsity vs transferred-attack hiding ===
+clean-detected vehicles: 6135   hidden under attack: 503 (8.2%)
+
+(1) hide-rate by on-target LiDAR point count
+       0-4 pts : hide  14.1%   (n=1209)
+      5-19 pts : hide  10.1%   (n=1445)
+     20-49 pts : hide   7.8%   (n=884)
+    50-149 pts : hide   5.8%   (n=1084)
+   150-499 pts : hide   4.5%   (n=814)
+      500+ pts : hide   2.4%   (n=699)
+  corr(hidden, log points) = -0.138  (negative = sparse easier)
+
+(2) hide-rate by #vehicles in scene (multi-vehicle angle)
+       1 veh : hide   0.0%   (n=17)
+     2-3 veh : hide   1.8%   (n=337)
+     4-6 veh : hide   5.5%   (n=582)
+    7-10 veh : hide   9.1%   (n=835)
+     11+ veh : hide   8.9%   (n=4364)
+  corr(hidden, #veh) = +0.108

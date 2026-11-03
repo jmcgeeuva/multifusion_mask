@@ -17,14 +17,20 @@ C=config/classification/classification4.py
 BASE="--mask all --cell 8 --place bbox --inference-norm --vanish-form bce --k-dense 5 --k-prop 3 --perscene-steps 100 --w-margin 0"
 NAMES=(patch_f20_ps patch_f40_ps patch_f20_uni \
        abl_suppress_none abl_suppress_instance_fusion \
-       abl_hull_none abl_hull_instance_fusion)
+       abl_hull_none abl_hull_instance_fusion \
+       abl_suppress_grid2region abl_suppress_both \
+       abl_hull_grid2region abl_hull_both)
 ARGS=("--mode perscene --attack patch --patch-frac 0.2" \
       "--mode perscene --attack patch --patch-frac 0.4" \
       "--mode universal --attack patch --patch-frac 0.2 --eval-every 500" \
       "--mode perscene --region-mode suppress --w-region 1.0 --fp-eval --ablate none" \
       "--mode perscene --region-mode suppress --w-region 1.0 --fp-eval --ablate instance_fusion" \
       "--mode perscene --region-mode hull_saturate --w-region 1.0 --w-vanish 0 --fp-eval --ablate none" \
-      "--mode perscene --region-mode hull_saturate --w-region 1.0 --w-vanish 0 --fp-eval --ablate instance_fusion")
+      "--mode perscene --region-mode hull_saturate --w-region 1.0 --w-vanish 0 --fp-eval --ablate instance_fusion" \
+      "--mode perscene --region-mode suppress --w-region 1.0 --fp-eval --ablate grid2region" \
+      "--mode perscene --region-mode suppress --w-region 1.0 --fp-eval --ablate both" \
+      "--mode perscene --region-mode hull_saturate --w-region 1.0 --w-vanish 0 --fp-eval --ablate grid2region" \
+      "--mode perscene --region-mode hull_saturate --w-region 1.0 --w-vanish 0 --fp-eval --ablate both")
 i=${SLURM_ARRAY_TASK_ID:-0}; N=${NAMES[$i]}
 echo "=== job ${SLURM_ARRAY_JOB_ID}_${i} $N $(hostname) $(nvidia-smi --query-gpu=name --format=csv,noheader)"
 $PY attack_multi.py "$C" --out "logs/attack/${SLURM_ARRAY_JOB_ID}_s${SEED:-0}/$N" --seed "${SEED:-0}" $BASE ${ARGS[$i]}

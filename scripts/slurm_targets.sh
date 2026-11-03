@@ -19,11 +19,11 @@ C=config/classification/classification4.py
 T=$SLURM_ARRAY_TASK_ID
 NAMES=( veh                 nonveh                       both )
 CLS=(  "car,truck,bus"     "person,bicycle,motorcycle"  "car,truck,bus,person,bicycle,motorcycle" )
-OUT=logs/attack/targets_${SLURM_ARRAY_JOB_ID}/${NAMES[$T]}
+OUT=logs/attack/targets_${SLURM_ARRAY_JOB_ID}_s${SEED:-0}/${NAMES[$T]}
 echo "=== task $T ${NAMES[$T]} classes='${CLS[$T]}' -> $OUT ; $(hostname)"
 $PY attack_multi.py "$C" --out "$OUT" \
     --mode perscene --mask all --cell 8 --inference-norm --place bbox \
     --vanish-form bce --k-dense 5 --k-prop 3 --w-margin 0 \
     --heldout 20 --perscene-steps 80 --fp-eval \
-    --vehicles "${CLS[$T]}" --seed 0
+    --vehicles "${CLS[$T]}" --seed "${SEED:-0}"
 echo "=== rc $?"

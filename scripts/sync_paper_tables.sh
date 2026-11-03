@@ -13,5 +13,7 @@ mv -f "$STAGE"/*.tex "$DEST"/
 rmdir "$STAGE" 2>/dev/null || true
 # official nuScenes AP/NDS table (separate: reads the full-val official_*.json dumps)
 "$PY" tools/official_table.py --tex "$DEST/official.tex" >/dev/null || echo "WARN: official_table skipped (no official_*.json yet)"
+# cross-model transfer table (reads logs/transfer/bevf_metric_*.out; BEVFusion now, TransFusion later)
+"$PY" tools/transfer_table.py --tex "$DEST/transfer.tex" >/dev/null || echo "WARN: transfer_table skipped (no metric logs yet)"
 echo "moved generated tables -> $DEST"
 ls -1 "$DEST"

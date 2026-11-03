@@ -16,13 +16,20 @@ import os
 import os.path as osp
 
 # ---- manifest: which run feeds which row (relative to --results-root) ----
+# per-scene row and the universal/per-seq rows come from different job families; each is averaged
+# over 3 seeds (seed0 = original run, s1/s2 = reseeds). _agg ignores seeds whose eval.json is absent,
+# so the table renders with whatever has landed and upgrades as the reseeds finish.
+HID_PERSCENE_DIRS = ["logs/attack/bneval_22125443",
+                     "logs/attack/psseed_22261713_s1", "logs/attack/psseed_22261715_s2"]
+HID_UNIFIX_DIRS = ["logs/attack/22125951",
+                   "logs/attack/22261712_s1", "logs/attack/22261714_s2"]
 HIDING_ROWS = [
-    # (label, eval.json, node)   node: 'all' = summary['all']; 'perseq_test' = summary['test_targeted']
-    ("Per-scene (upper bound)",            "logs/attack/bneval_22125443/ps_multi_bneval/eval.json", "all"),
-    ("Per-sequence (bbox, held-out)",      "logs/attack/22125951/perseq_bbox/eval.json",            "perseq_test"),
-    ("Universal, tile",                    "logs/attack/22125951/fix_tile/eval.json",               "all"),
-    ("Universal, screen",                  "logs/attack/22125951/fix_screen/eval.json",             "all"),
-    ("\\textbf{Universal, bbox}",          "logs/attack/22125951/fix_bbox/eval.json",               "all"),
+    # (label, arm dir, node, seed dirs)   node: 'all' = summary['all']; 'perseq_test' = summary['test_targeted']
+    ("Per-scene (upper bound)",       "ps_multi_bneval", "all",         HID_PERSCENE_DIRS),
+    ("Per-sequence (bbox, held-out)", "perseq_bbox",     "perseq_test", HID_UNIFIX_DIRS),
+    ("Universal, tile",               "fix_tile",        "all",         HID_UNIFIX_DIRS),
+    ("Universal, screen",             "fix_screen",      "all",         HID_UNIFIX_DIRS),
+    ("\\textbf{Universal, bbox}",     "fix_bbox",        "all",         HID_UNIFIX_DIRS),
 ]
 LIDAR_SOURCE = "logs/attack/22125951/fix_bbox/eval.json"
 LIDAR_STRATA = [  # (label, summarize-key)
@@ -31,28 +38,39 @@ LIDAR_STRATA = [  # (label, summarize-key)
     ("LiDAR pts $\\ge100$",    "lidar_pts_100-9999"),
     ("range $>\\SI{35}{m}$",   "dist_35-999m"),
 ]
-# ghost source: prefer the real region array, fall back to the smoke; first that exists wins.
-GHOST_SOURCES = {
-    "suppress":      ["logs/attack/22133019/ps_suppress_region/eval.json"],
-    "pull-up":       ["logs/attack/22133019/ps_flatten_pullup/eval.json"],
-    "hull (multi)":  ["logs/attack/22133019/ps_hull_saturate_multi/eval.json",
-                      "logs/attack/smoke4/hull/eval.json"],
-    "hull (single)": ["logs/attack/22133019/ps_hull_saturate_single/eval.json"],
-}
+# ghost table: per-scene false positives by BEV zone, mean+-std over 3 seeds.
+GHOST_SEED_DIRS = ["logs/attack/22133019", "logs/attack/22253023_s1", "logs/attack/22253026_s2"]
+GHOST_ARMS = [  # (row label, arm dir name under each seed dir)
+    ("suppress",      "ps_suppress_region"),
+    ("pull-up",       "ps_flatten_pullup"),
+    ("hull (multi)",  "ps_hull_saturate_multi"),
+    ("hull (single)", "ps_hull_saturate_single"),
+]
 GHOST_ZONES = ["hull", "ring", "elsewhere"]
 
-# patch baseline (FiNE-style) vs our full-vehicle texture
-PATCH_ROWS = [  # (label, eval.json, node, area_label)
-    ("Full texture (per-scene)",      "logs/attack/bneval_22125443/ps_multi_bneval/eval.json", "all", "full mask"),
-    ("Full texture (universal bbox)", "logs/attack/22125951/fix_bbox/eval.json",                "all", "full mask"),
-    ("Patch 20\\% box (per-scene)",   "logs/attack/22137329/patch_f20_ps/eval.json",            "all", "0.2 box"),
-    ("Patch 40\\% box (per-scene)",   "logs/attack/22137329/patch_f40_ps/eval.json",            "all", "0.4 box"),
-    ("Patch 20\\% box (universal)",   "logs/attack/22182895/patch_f20_uni/eval.json",           "all", "0.2 box"),
+# patch baseline (FiNE-style) vs our full-vehicle texture, 3-seed. Full-texture rows reuse the
+# hiding seed dirs so both sides of the comparison carry the same error bars; patch arms come from
+# slurm_baseline_ablation.sh (seed0 = original runs, s1/s2 = reseeds 22261864/22261865).
+PATCH_PS_DIRS = ["logs/attack/22137329", "logs/attack/22261864_s1", "logs/attack/22261865_s2"]
+PATCH_UNI_DIRS = ["logs/attack/22182895", "logs/attack/22261864_s1", "logs/attack/22261865_s2"]
+PATCH_ROWS = [  # (label, arm dir, node, area_label, seed dirs)
+    ("Full texture (per-scene)",      "ps_multi_bneval", "all", "full mask", HID_PERSCENE_DIRS),
+    ("Full texture (universal bbox)", "fix_bbox",        "all", "full mask", HID_UNIFIX_DIRS),
+    ("Patch 20\\% box (per-scene)",   "patch_f20_ps",    "all", "0.2 box",   PATCH_PS_DIRS),
+    ("Patch 40\\% box (per-scene)",   "patch_f40_ps",    "all", "0.4 box",   PATCH_PS_DIRS),
+    ("Patch 20\\% box (universal)",   "patch_f20_uni",   "all", "0.2 box",   PATCH_UNI_DIRS),
 ]
-# attribution ablation: effect of neutralizing each fusion-mixing stage
-ABL_STAGES = ["none", "instance_fusion"]
-ABL_SRC = {"suppress": "logs/attack/22137329/abl_suppress_%s/eval.json",
-           "hull":     "logs/attack/22137329/abl_hull_%s/eval.json"}
+# attribution ablation: effect of neutralizing each fusion-mixing stage, averaged over 3 seeds.
+# per-stage seed directories differ (none/instance from the original run + 2 reseeds; grid2region/
+# both from the fixed-code reseeds). Each dir holds abl_{suppress,hull}_<stage>/eval.json.
+ABL_STAGES = ["none", "instance_fusion", "grid2region", "both"]
+ABL_SEED_DIRS = {
+    "none":            ["logs/attack/22137329", "logs/attack/22253025_s1", "logs/attack/22253028_s2"],
+    "instance_fusion": ["logs/attack/22137329", "logs/attack/22253025_s1", "logs/attack/22253028_s2"],
+    "grid2region":     ["logs/attack/22253522_s0", "logs/attack/22253523_s1", "logs/attack/22253524_s2"],
+    "both":            ["logs/attack/22253522_s0", "logs/attack/22253523_s1", "logs/attack/22253524_s2"],
+}
+ABL_ARM = {"suppress": "abl_suppress_%s", "hull": "abl_hull_%s"}
 
 AUTO = "% AUTO-GENERATED by tools/paper_tables.py --- do not edit; regenerate with scripts/sync_paper_tables.sh\n"
 
@@ -94,21 +112,47 @@ def conf_recall(cell):
     return f"{a['conf']:.2f} ({a['recall_0p3']*100:.0f}\\%)"
 
 
+def _hid_conf(root, dirs, arm, which, field):
+    """targeted-vehicle confidence for one placement/condition, one value per seed dir."""
+    vals = []
+    for d in dirs:
+        r = load(root, f"{d}/{arm}/eval.json")
+        s = node(r["summary"], which) if r else None
+        cell = (s or {}).get(field)
+        a = (cell or {}).get("all", cell) if cell else None
+        vals.append(a.get("conf") if a else None)
+    return vals
+
+
+def _hid_recall(root, dirs, arm, which):
+    vals = []
+    for d in dirs:
+        r = load(root, f"{d}/{arm}/eval.json")
+        s = node(r["summary"], which) if r else None
+        a = (s or {}).get("learned") or {}
+        a = a.get("all", a)
+        vals.append(a.get("recall_0p3") if a else None)
+    return vals
+
+
 def hiding_table(root):
     L = [AUTO, "\\begin{table}[t]\\centering\\small", "\\begin{tabular}{lccc}", "\\toprule",
          "Regime (placement) & clean & random & learned \\\\", "\\midrule"]
-    for label, rel, which in HIDING_ROWS:
-        r = load(root, rel)
-        s = node(r["summary"], which) if r else None
-        if s is None:
-            L.append(f"% MISSING: {rel}")
-            L.append(f"{label} & -- & -- & -- \\\\")
+    for label, arm, which, dirs in HIDING_ROWS:
+        cl = _agg(_hid_conf(root, dirs, arm, which, "clean"))
+        rnd = _agg(_hid_conf(root, dirs, arm, which, "random"))
+        le = _agg(_hid_conf(root, dirs, arm, which, "learned"))
+        rec = [v for v in _hid_recall(root, dirs, arm, which) if v is not None]
+        if le == "--":
+            L.append(f"% MISSING: {arm}")
+            L.append(f"{label} & {cl} & {rnd} & -- \\\\")
             continue
-        L.append(f"{label} & {conf(s.get('clean'))} & {conf(s.get('random'))} & {conf_recall(s.get('learned'))} \\\\")
+        rpar = f" ({100 * sum(rec) / len(rec):.0f}\\%)" if rec else ""
+        L.append(f"{label} & {cl} & {rnd} & {le}{rpar} \\\\")
     L += ["\\bottomrule", "\\end{tabular}",
-          "\\caption{Targeted-vehicle confidence (recall@0.3 in parentheses). Per-scene is a "
-          "same-frame upper bound; universal/bbox is a single texture on disjoint val scenes. "
-          "Inference-mode normalization.}",
+          "\\caption{\\prelim{Mean$\\pm$std over 3 seeds.} Targeted-vehicle confidence (recall@0.3 in "
+          "parentheses). Per-scene is a same-frame upper bound; universal/bbox is a single texture on "
+          "disjoint val scenes. Inference-mode normalization.}",
           "\\label{tab:hiding}", "\\end{table}", ""]
     return "\n".join(L)
 
@@ -130,40 +174,35 @@ def lidar_table(root):
     return "\n".join(L)
 
 
+def _ghost_zone_vals(root, arm, tag, zone):
+    """per-scene false positives for one arm/condition/zone, one value per seed dir (None if absent)."""
+    vals = []
+    for d in GHOST_SEED_DIRS:
+        r = load(root, f"{d}/{arm}/eval.json")
+        fp = (r or {}).get("extra", {}).get("false_positives", {}).get(tag)
+        vals.append(fp[zone]["per_scene"] if fp and zone in fp else None)
+    return vals
+
+
 def ghosts_table(root):
-    def fp(rels):
-        for rel in rels:
-            r = load(root, rel)
-            if r and r.get("extra", {}).get("false_positives", {}).get("learned"):
-                return r["extra"]["false_positives"]["learned"], rel
-        return None, rels[0]
     L = [AUTO, "\\begin{table}[t]\\centering\\small", "\\begin{tabular}{lccc}", "\\toprule",
          "Attack (learned) & hull & ring & elsewhere \\\\", "\\midrule"]
-    # clean/random baseline from the first available source
-    base = None
-    for rels in GHOST_SOURCES.values():
-        for rel in rels:
-            r = load(root, rel)
-            if r and r.get("extra", {}).get("false_positives", {}).get("clean"):
-                base = r["extra"]["false_positives"]
-                break
-        if base:
-            break
+    # clean/random baselines (seed-independent clean; random varies) from the suppress arm's dirs
+    base_arm = GHOST_ARMS[0][1]
     for tag in ("clean", "random"):
-        if base and base.get(tag):
-            L.append(f"{tag} & " + " & ".join(f"{base[tag][z]['per_scene']:.2f}" for z in GHOST_ZONES) + " \\\\")
+        cells = [_agg(_ghost_zone_vals(root, base_arm, tag, z)) for z in GHOST_ZONES]
+        if any(c != "--" for c in cells):
+            L.append(f"{tag} & " + " & ".join(cells) + " \\\\")
     L.append("\\midrule")
-    for label, rels in GHOST_SOURCES.items():
-        d, rel = fp(rels)
-        if d is None:
-            L.append(f"% MISSING: {rel}")
-            L.append(f"{label} & -- & -- & -- \\\\")
-            continue
-        L.append(f"{label} & " + " & ".join(f"{d[z]['per_scene']:.2f}" for z in GHOST_ZONES) + " \\\\")
+    for label, arm in GHOST_ARMS:
+        cells = [_agg(_ghost_zone_vals(root, arm, "learned", z)) for z in GHOST_ZONES]
+        if all(c == "--" for c in cells):
+            L.append(f"% MISSING: {arm}")
+        L.append(f"{label} & " + " & ".join(cells) + " \\\\")
     L += ["\\bottomrule", "\\end{tabular}",
-          "\\caption{Ghost (false-positive) proposals per scene, by BEV zone. The multi-object "
-          "hull-saturate attack is expected to raise in-hull ghosts above the clean floor and "
-          "above the single-object control.}",
+          "\\caption{\\prelim{Mean$\\pm$std over 3 seeds.} Ghost (false-positive) proposals per scene, "
+          "by BEV zone. The multi-object hull-saturate attack raises in-hull ghosts above the clean "
+          "floor and above the single-object control.}",
           "\\label{tab:ghosts}", "\\end{table}", ""]
     return "\n".join(L)
 
@@ -171,46 +210,186 @@ def ghosts_table(root):
 def patch_table(root):
     L = [AUTO, "\\begin{table}[t]\\centering\\small", "\\begin{tabular}{llcc}", "\\toprule",
          "Attack & painted area & clean & learned \\\\", "\\midrule"]
-    for label, rel, which, area in PATCH_ROWS:
-        r = load(root, rel); sm = node(r["summary"], which) if r else None
-        if sm is None:
-            L.append(f"% MISSING: {rel}"); L.append(f"{label} & {area} & -- & -- \\\\"); continue
-        L.append(f"{label} & {area} & {conf(sm.get('clean'))} & {conf_recall(sm.get('learned'))} \\\\")
+    for label, arm, which, area, dirs in PATCH_ROWS:
+        cl = _agg(_hid_conf(root, dirs, arm, which, "clean"))
+        le = _agg(_hid_conf(root, dirs, arm, which, "learned"))
+        rec = [v for v in _hid_recall(root, dirs, arm, which) if v is not None]
+        if le == "--":
+            L.append(f"% MISSING: {arm}")
+            L.append(f"{label} & {area} & {cl} & -- \\\\")
+            continue
+        rpar = f" ({100 * sum(rec) / len(rec):.0f}\\%)" if rec else ""
+        L.append(f"{label} & {area} & {cl} & {le}{rpar} \\\\")
     L += ["\\bottomrule", "\\end{tabular}",
-          "\\caption{FiNE-style object patch vs.\\ our full-vehicle texture, same detector / split / "
-          "metric / loss. Painted area is the fraction of each vehicle's 2D box.}",
+          "\\caption{\\prelim{Mean$\\pm$std over 3 seeds.} FiNE-style object patch vs.\\ our "
+          "full-vehicle texture, same detector / split / metric / loss. Painted area is the fraction "
+          "of each vehicle's 2D box.}",
           "\\label{tab:patch}", "\\end{table}", ""]
     return "\n".join(L)
 
 
+# targeting by class: own-class confidence clean vs attack, recall, in-hull ghosts, 3-seed.
+TARGET_SEED_DIRS = ["logs/attack/targets_22214810",
+                    "logs/attack/targets_22253024_s1", "logs/attack/targets_22253027_s2"]
+TARGET_ARMS = [("Vehicles (car/truck/bus)", "veh"),
+               ("Non-vehicles (ped/bike/moto)", "nonveh"),
+               ("Both", "both")]
+
+
+def targets_table(root):
+    def metric(r, which):
+        if not r:
+            return None
+        a = r.get("summary", {}).get("all", {})
+        if which == "clean":
+            return a.get("clean", {}).get("all", {}).get("conf")
+        if which == "attack":
+            return a.get("learned", {}).get("all", {}).get("conf")
+        if which == "recall":
+            return a.get("learned", {}).get("all", {}).get("recall_0p3")
+        if which == "ghosts":
+            return r.get("extra", {}).get("false_positives", {}).get("learned", {}).get("hull", {}).get("per_scene")
+        return None
+    L = [AUTO, "\\begin{table}[t]\\centering\\small", "\\begin{tabular}{lcccc}", "\\toprule",
+         "Target set & clean & attack & recall & ghosts \\\\", "\\midrule"]
+    for label, arm in TARGET_ARMS:
+        seeds = [load(root, f"{d}/{arm}/eval.json") for d in TARGET_SEED_DIRS]
+        cl = _agg([metric(r, "clean") for r in seeds], 3)
+        at = _agg([metric(r, "attack") for r in seeds], 3)
+        rc = _agg([metric(r, "recall") for r in seeds], 2)
+        gh = _agg([metric(r, "ghosts") for r in seeds], 2)
+        L.append(f"{label} & {cl} & {at} & {rc} & {gh} \\\\")
+    L += ["\\bottomrule", "\\end{tabular}",
+          "\\caption{\\prelim{Mean$\\pm$std over 3 seeds ($20$ held-out scenes).} "
+          "\\textbf{Targeting by class.} Own-class confidence on the targeted objects, clean vs.\\ "
+          "attack, with recall at $0.3$ and in-hull fabricated ghosts/scene. The attack hides "
+          "non-vehicles too; targeting both classes drives confidence lowest.}",
+          "\\label{tab:target}", "\\end{table}", ""]
+    return "\n".join(L)
+
+
+def _agg(vals, dec=2):
+    """mean$\\pm$std over available seeds; single value if only one; '--' if none."""
+    vals = [v for v in vals if v is not None]
+    if not vals:
+        return "--"
+    m = sum(vals) / len(vals)
+    if len(vals) == 1:
+        return f"{m:.{dec}f}"
+    sd = (sum((v - m) ** 2 for v in vals) / len(vals)) ** 0.5
+    return f"{m:.{dec}f}$\\pm${sd:.{dec}f}"
+
+
+def _raw_clean(r):
+    s = node((r or {}).get("summary", {}), "all")
+    a = (s or {}).get("clean") or {}
+    a = a.get("all", a)
+    return a.get("conf")
+
+
+def _raw_learned(r):
+    s = node((r or {}).get("summary", {}), "all")
+    a = (s or {}).get("learned") or {}
+    a = a.get("all", a)
+    return a.get("conf")
+
+
+def _raw_collat(r):
+    c = (r or {}).get("extra", {}).get("collateral_untextured_vehicles", {}).get("all", {}).get("learned")
+    if not c:
+        return None
+    c = c.get("all", c)
+    return c.get("conf")
+
+
+def _raw_ghost(r):
+    fp = (r or {}).get("extra", {}).get("false_positives", {}).get("learned")
+    return fp["hull"]["per_scene"] if fp else None
+
+
 def attribution_table(root):
-    def collat(r):
-        c = (r or {}).get("extra", {}).get("collateral_untextured_vehicles", {}).get("all", {}).get("learned") if r else None
-        return conf(c) if c else "--"
-    def ghosts(r):
-        fp = (r or {}).get("extra", {}).get("false_positives", {}).get("learned") if r else None
-        return f"{fp['hull']['per_scene']:.2f}" if fp else "--"
     L = [AUTO, "\\begin{table}[t]\\centering\\small", "\\begin{tabular}{llccc}", "\\toprule",
          "Attack & ablation & clean & learned & effect \\\\",
          "\\midrule"]
-    for atk, eff_name, eff_fn in (("suppress (glare)", "collateral", collat), ("hull (ghost)", "hull ghosts/scene", ghosts)):
-        key = "suppress" if atk.startswith("suppress") else "hull"
+    for atk, key, eff_raw in (("suppress (glare)", "suppress", _raw_collat),
+                              ("hull (ghost)", "hull", _raw_ghost)):
         for st in ABL_STAGES:
-            r = load(root, ABL_SRC[key] % st)
-            sm = node(r["summary"], "all") if r else None
-            cl = conf(sm.get("clean")) if sm else "--"
-            le = conf(sm.get("learned")) if sm else "--"
+            seeds = [load(root, f"{d}/{ABL_ARM[key] % st}/eval.json") for d in ABL_SEED_DIRS[st]]
+            cl = _agg([_raw_clean(r) for r in seeds])
+            le = _agg([_raw_learned(r) for r in seeds])
+            ef = _agg([eff_raw(r) for r in seeds])
             name = atk if st == "none" else ""
             st_tex = st.replace("_", "\\_")
-            L.append(f"{name} & {st_tex} & {cl} & {le} & {eff_fn(r)} \\\\")
+            L.append(f"{name} & {st_tex} & {cl} & {le} & {ef} \\\\")
         L.append("\\midrule")
     L[-1] = "\\bottomrule"
     L += ["\\end{tabular}",
-          "\\caption{Attribution: neutralizing a fusion-mixing stage and re-running the attack. "
-          "`effect' is collateral (untextured-vehicle conf, lower = more glare) for suppress, and "
-          "in-hull ghosts/scene for hull. A stage whose removal kills the effect is the leak; clean "
-          "confidence confirms the detector did not simply collapse.}",
+          "\\caption{\\prelim{Mean$\\pm$std over 3 seeds.} Attribution: neutralizing a fusion-mixing "
+          "stage and re-running the attack. `effect' is collateral (untextured-vehicle conf, lower = "
+          "more glare) for suppress, and in-hull ghosts/scene for hull. \\emph{instance\\_fusion} is a "
+          "clean knockout (clean conf intact), so the persistence of each effect is attributable; "
+          "\\emph{grid2region} is not --- removing region attention collapses clean confidence itself, "
+          "so it cannot be read as the attack being stage-independent.}",
           "\\label{tab:attribution}", "\\end{table}", ""]
+    return "\n".join(L)
+
+
+# ---- cross-family transfer: attack hide-rate stratified by on-target LiDAR points ----
+# produced by tools/analyze_lidar_density.py (fixed-format .txt), one file per victim.
+DENSITY_SRC = [  # (victim label, relative path)
+    ("BEVFusion", "logs/transfer/density_bevf_multi.txt"),
+    ("CMT",       "logs/transfer/density_cmt_multi.txt"),
+]
+# bin key (as printed by the analyzer) -> LaTeX row label; fixed order
+DENSITY_BINS = [("0-4", "$<5$"), ("5-19", "$5$--$19$"), ("20-49", "$20$--$49$"),
+                ("50-149", "$50$--$149$"), ("150-499", "$150$--$499$"), ("500+", "$\\ge500$")]
+
+
+def parse_density(root, rel):
+    """Parse an analyze_lidar_density.py .txt into {bin_key: hide_pct, 'corr': x, 'N':n, 'H':h}."""
+    import re
+    p = osp.join(root, rel)
+    if not osp.isfile(p):
+        return None
+    d = {}
+    for line in open(p):
+        m = re.match(r"\s*([\d+\-]+) pts : hide\s+([\d.]+)%\s+\(n=(\d+)\)", line)
+        if m:
+            d[m.group(1)] = (float(m.group(2)), int(m.group(3)))
+        m = re.search(r"corr\(hidden, log points\) = ([+\-][\d.]+)", line)
+        if m:
+            d["corr"] = float(m.group(1))
+        m = re.match(r".*clean-detected vehicles: (\d+)\s+hidden under attack: (\d+)", line)
+        if m:
+            d["N"], d["H"] = int(m.group(1)), int(m.group(2))
+    return d or None
+
+
+def lidar_transfer_table(root):
+    cols = [(lab, parse_density(root, rel)) for lab, rel in DENSITY_SRC]
+    ncol = "c" * len(cols)
+    L = [AUTO, "\\begin{table}[t]\\centering\\small", f"\\begin{{tabular}}{{l{ncol}}}", "\\toprule",
+         "On-target LiDAR points & " + " & ".join(lab for lab, _ in cols) + " \\\\",
+         "\\midrule"]
+    for key, rowlab in DENSITY_BINS:
+        cells = []
+        for _lab, d in cols:
+            cells.append(f"{d[key][0]:.1f}" if d and key in d else "--")
+        L.append(f"{rowlab} & " + " & ".join(cells) + " \\\\")
+    L.append("\\midrule")
+    corrs = [f"{d['corr']:+.2f}" if d and "corr" in d else "--" for _l, d in cols]
+    L.append("corr(hide, log pts) & " + " & ".join(corrs) + " \\\\")
+    for _l, d in cols:
+        if d and "N" not in d:
+            L.append(f"% MISSING counts for a victim")
+            break
+    L += ["\\bottomrule", "\\end{tabular}",
+          "\\caption{\\prelim{Preliminary.} \\textbf{The thin-LiDAR leak transfers.} "
+          "Hide-rate (\\%) of clean-detected vehicles under the \\emph{transferred} multi-vehicle "
+          "attack, on never-optimized victims, stratified by on-target LiDAR points. The attack "
+          "concentrates on LiDAR-sparse vehicles on both detectors (monotone; negative correlation), "
+          "exactly as the premise predicts for a camera-side leak.}",
+          "\\label{tab:lidar-transfer}", "\\end{table}", ""]
     return "\n".join(L)
 
 
@@ -221,7 +400,8 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     tables = {"hiding.tex": hiding_table, "lidar_strata.tex": lidar_table, "ghosts.tex": ghosts_table,
-              "patch_baseline.tex": patch_table, "attribution.tex": attribution_table}
+              "patch_baseline.tex": patch_table, "attribution.tex": attribution_table,
+              "lidar_transfer.tex": lidar_transfer_table, "targets.tex": targets_table}
     for name, fn in sorted(tables.items()):
         with open(osp.join(args.out, name), "w") as fh:
             fh.write(fn(args.results_root))

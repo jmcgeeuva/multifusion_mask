@@ -1,0 +1,19 @@
+=== BEVFusion (multi): LiDAR-sparsity vs transferred-attack hiding ===
+clean-detected vehicles: 4946   hidden under attack: 328 (6.6%)
+
+(1) hide-rate by on-target LiDAR point count
+       0-4 pts : hide  21.0%   (n=746)
+      5-19 pts : hide   8.4%   (n=1122)
+     20-49 pts : hide   4.4%   (n=734)
+    50-149 pts : hide   3.6%   (n=937)
+   150-499 pts : hide   1.1%   (n=751)
+      500+ pts : hide   0.5%   (n=656)
+  corr(hidden, log points) = -0.234  (negative = sparse easier)
+
+(2) hide-rate by #vehicles in scene (multi-vehicle angle)
+       1 veh : hide   0.0%   (n=17)
+     2-3 veh : hide   1.0%   (n=296)
+     4-6 veh : hide   3.5%   (n=510)
+    7-10 veh : hide   4.2%   (n=721)
+     11+ veh : hide   8.1%   (n=3402)
+  corr(hidden, #veh) = +0.132

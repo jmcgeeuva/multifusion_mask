@@ -557,8 +557,12 @@ def main():
     ap.add_argument('--patch-frac', type=float, default=0.3, help='patch area as fraction of each 2D box')
     ap.add_argument('--patch-on-vehicle', dest='patch_on_vehicle', action='store_true', default=True)
     ap.add_argument('--no-patch-on-vehicle', dest='patch_on_vehicle', action='store_false')
-    ap.add_argument('--ablate', choices=['none', 'instance_fusion'], default='none',
-                    help='instance_fusion: run IS-Fusion instance->scene attention but discard its effect\n                          on the scene features (keep its instance heatmap so losses stay valid)')
+    ap.add_argument('--ablate', choices=['none', 'instance_fusion', 'grid2region', 'both'], default='none',
+                    help='neutralize a cross-BEV-cell mixing stage and re-run the attack.\n'
+                         'instance_fusion: run instance->scene attention but discard its effect on the\n'
+                         '  scene features (keep its instance heatmap so losses stay valid).\n'
+                         'grid2region: make each grid2region self-attention an identity (no region mixing).\n'
+                         'both: neutralize both stages.')
     # figure dump (default off): decoded clean/attacked detections + display images for chosen scenes
     ap.add_argument('--dump', default=None, help='write a figure bundle .pkl (clean/attacked boxes, images, calib)')
     ap.add_argument('--dump-scenes', default='', help='comma-separated held-out scene indices to dump')
@@ -621,7 +625,17 @@ def main():
     for p in model.parameters():
         p.requires_grad = False
     det.detach = False
-    if args.ablate == 'instance_fusion':
+    if args.ablate in ('grid2region', 'both'):
+        # Neutralize region mixing WITHOUT breaking structure: each grid2region_att is an SSTv2
+        # that scatters sparse voxels to dense BEV (linear0 + recover_bev). Only its windowed
+        # self-attention blocks mix across cells, so identity just those (keep scatter/shape).
+        _nb = 0
+        for _sst in det.fusion_encoder.grid2region_att:
+            for _blk in _sst.block_list:                 # BasicShiftBlockV2: windowed self-attention
+                _blk.forward = (lambda feat, *a, **k: feat)   # pass voxel features through unmixed
+                _nb += 1
+        log(f'ablation: grid2region self-attention neutralized ({_nb} SST blocks -> identity)')
+    if args.ablate in ('instance_fusion', 'both'):
         _orig_if = det.fusion_encoder.instance_fusion   # bound method
         def _if_ablate(bev, scene, bs, **k):
             _, ins_hm = _orig_if(bev, scene, bs, **k)    # keep the instance heatmap (losses need it)
